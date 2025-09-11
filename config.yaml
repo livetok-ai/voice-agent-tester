@@ -1,0 +1,11 @@
+url: "http://localhost:8080/demo/index.html"
+headless: false
+steps:
+  - action: click
+    element: "#start"
+  - action: wait_for_voice
+  # - action: wait_for_silence
+  - action: speak
+    text: "Hello, this is a test." 
+  # - action: wait_for_voice
+  #   metric: "elapsed_time"
