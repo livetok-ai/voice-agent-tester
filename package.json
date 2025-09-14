@@ -1,0 +1,47 @@
+{
+  "name": "voice-agent-tester",
+  "version": "1.0.0",
+  "description": "A command-line tool to test voice agents using Puppeteer",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "server": "node src/server.js",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:watch": "jest --watch"
+  },
+  "bin": {
+    "voice-agent-tester": "./src/index.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "glob": "^11.0.0",
+    "openai": "^4.104.0",
+    "puppeteer": "^24.0.0",
+    "yaml": "^2.3.0",
+    "yargs": "^17.7.0"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.0.0",
+    "jest": "^29.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    },
+    "transform": {},
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ]
+  },
+  "keywords": [
+    "voice",
+    "agent",
+    "testing",
+    "puppeteer",
+    "automation"
+  ],
+  "author": "Voice Agent Tester",
+  "license": "MIT"
+}

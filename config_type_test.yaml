@@ -1,0 +1,10 @@
+url: "https://www.google.com"
+headless: false
+steps:
+  - action: type
+    selector: 'input[name="q"]'
+    text: "voice agent testing"
+  - action: sleep
+    time: 2000
+  - action: click
+    selector: 'input[value="Google Search"]'
