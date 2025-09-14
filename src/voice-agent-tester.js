@@ -414,8 +414,6 @@ export class VoiceAgentTester {
       throw new Error('No text specified for type action');
     }
 
-    console.log(`Typing "${text}" into selector: ${selector}`);
-
     // Wait for the element to be available
     await this.page.waitForSelector(selector);
 
