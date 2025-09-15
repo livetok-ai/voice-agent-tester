@@ -2,16 +2,12 @@
 
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import YAML from 'yaml';
-import puppeteer from 'puppeteer';
 import { VoiceAgentTester } from './voice-agent-tester.js';
 import { ReportGenerator } from './report.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { createServer } from './server.js';
 
 // Parse command-line arguments
 const argv = yargs(hideBin(process.argv))
@@ -53,7 +49,11 @@ const argv = yargs(hideBin(process.argv))
   .argv;
 
 async function main() {
+  let server;
   try {
+    // Start the assets server
+    server = createServer();
+
     // Load YAML config
     const configPath = path.resolve(argv.config);
     if (!fs.existsSync(configPath)) {
@@ -64,7 +64,7 @@ async function main() {
     const config = YAML.parse(configFile);
 
     console.log(`Config file loaded: ${argv.config} - URL: ${config.url}`);
-    
+
     const repetitions = argv.repeat || 1;
     console.log(`Running scenario ${repetitions} time(s)`);
 
@@ -109,6 +109,13 @@ async function main() {
   } catch (error) {
     console.error('Error running scenario:', error.message);
     process.exit(1);
+  } finally {
+    // Close the server to allow process to exit
+    if (server) {
+      server.close(() => {
+        console.log('Server closed');
+      });
+    }
   }
 }
 

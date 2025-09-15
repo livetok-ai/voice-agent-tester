@@ -25,7 +25,7 @@ export class VoiceAgentTester {
     return new Promise(r => setTimeout(r, time));
   }
 
-  waitForAudioEvent(eventType, timeout = 300000) {
+  waitForAudioEvent(eventType, timeout = 30000) {
     return new Promise((resolve, reject) => {
       // First check if we already have the event in queue
       const existingEventIndex = this.audioEventQueue.findIndex(event => event.eventType === eventType);
@@ -312,8 +312,6 @@ export class VoiceAgentTester {
       throw new Error('No evaluation prompt specified for listen action');
     }
 
-    console.log(`Starting listen with evaluation: ${evaluation}`);
-
     try {
       // Start recording
       await this.page.evaluate(() => {
@@ -362,20 +360,6 @@ export class VoiceAgentTester {
       // Evaluate the transcription against the evaluation prompt
       const evaluationResult = await this.evaluateTranscription(transcription, evaluation);
       console.log(`Evaluation result: ${evaluationResult}`);
-
-      // Publish the evaluation result
-      const finalEvent = {
-        transcription,
-        evaluation: evaluationResult,
-        timestamp: Date.now()
-      };
-
-      this.audioEventQueue.push({
-        eventType: 'listencomplete',
-        data: finalEvent,
-        timestamp: Date.now()
-      });
-
     } catch (error) {
       console.error('Error in listen command:', error.message);
       throw error;
@@ -388,7 +372,6 @@ export class VoiceAgentTester {
       throw new Error('No time specified for sleep action');
     }
 
-    console.log(`Sleeping for ${time}ms`);
     await this.sleep(time);
   }
 
@@ -398,7 +381,6 @@ export class VoiceAgentTester {
       throw new Error('No selector specified for wait_for_element action');
     }
 
-    console.log(`Waiting for selector: ${selector}`);
     await this.page.waitForSelector(selector);
   }
 
