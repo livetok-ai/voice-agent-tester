@@ -201,6 +201,9 @@ export class VoiceAgentTester {
         case 'type':
           await this.handleType(step);
           break;
+        case 'screenshot':
+          await this.handleScreenshot(step);
+          break;
         default:
           console.log(`Unknown action: ${action}`);
       }
@@ -402,6 +405,31 @@ export class VoiceAgentTester {
     // Focus the element and type the text
     await this.page.focus(selector);
     await this.page.type(selector, text);
+  }
+
+  async handleScreenshot(step) {
+    if (!this.page) {
+      throw new Error('Browser not launched. Call launch() first.');
+    }
+
+    const filename = step.filename || `screenshot_${Date.now()}.png`;
+    const outputDir = step.outputDir || path.join(__dirname, '..', 'output');
+
+    // Ensure output directory exists
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    const screenshotPath = path.join(outputDir, filename);
+
+    // Take screenshot with optional parameters
+    const screenshotOptions = {
+      path: screenshotPath,
+    };
+
+    await this.page.screenshot(screenshotOptions);
+
+    return screenshotPath;
   }
 
   async transcribeAudio(base64Audio, audioMetadata) {
