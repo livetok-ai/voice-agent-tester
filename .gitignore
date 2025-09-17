@@ -101,3 +101,8 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Config and data files
+*.yaml
+*.yml
+*.csv
