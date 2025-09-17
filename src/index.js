@@ -2,12 +2,16 @@
 
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import YAML from 'yaml';
 import { VoiceAgentTester } from './voice-agent-tester.js';
 import { ReportGenerator } from './report.js';
 import { createServer } from './server.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Parse command-line arguments
 const argv = yargs(hideBin(process.argv))
@@ -50,6 +54,7 @@ const argv = yargs(hideBin(process.argv))
 
 async function main() {
   let server;
+  let tempHtmlPath = null;
   try {
     // Start the assets server
     server = createServer();
@@ -63,7 +68,24 @@ async function main() {
     const configFile = fs.readFileSync(configPath, 'utf8');
     const config = YAML.parse(configFile);
 
-    console.log(`Config file loaded: ${argv.config} - URL: ${config.url}`);
+    // Handle HTML content vs URL
+    let targetUrl;
+    if (config.html) {
+      // Create temporary HTML file and serve it
+      const assetsDir = path.join(__dirname, '..', 'assets');
+      if (!fs.existsSync(assetsDir)) {
+        fs.mkdirSync(assetsDir, { recursive: true });
+      }
+      tempHtmlPath = path.join(assetsDir, 'temp.html');
+      fs.writeFileSync(tempHtmlPath, config.html, 'utf8');
+      targetUrl = `${argv.assetsServer}/assets/temp.html`;
+      console.log(`Config file loaded: ${argv.config} - HTML content served at: ${targetUrl}`);
+    } else if (config.url) {
+      targetUrl = config.url;
+      console.log(`Config file loaded: ${argv.config} - URL: ${config.url}`);
+    } else {
+      throw new Error('Config must contain either "url" or "html" field');
+    }
 
     const repetitions = argv.repeat || 1;
     console.log(`Running scenario ${repetitions} time(s)`);
@@ -84,7 +106,7 @@ async function main() {
       });
 
       try {
-        await tester.runScenario(config.url, config.steps || []);
+        await tester.runScenario(targetUrl, config.steps || []);
         
         if (repetitions > 1) {
           console.log(`=== Completed repetition ${i} of ${repetitions} ===`);
@@ -110,6 +132,12 @@ async function main() {
     console.error('Error running scenario:', error.message);
     process.exit(1);
   } finally {
+    // Clean up temporary HTML file if created
+    if (tempHtmlPath && fs.existsSync(tempHtmlPath)) {
+      fs.unlinkSync(tempHtmlPath);
+      console.log('Temporary HTML file cleaned up');
+    }
+
     // Close the server to allow process to exit
     if (server) {
       server.close(() => {

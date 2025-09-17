@@ -1,3 +1,6 @@
+// Check if we're in the AudioWorklet context
+if (typeof AudioWorkletProcessor !== 'undefined') {
+
 class RecordingProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -77,3 +80,7 @@ class RecordingProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor('recording-processor', RecordingProcessor);
+
+} else {
+  console.warn('AudioWorkletProcessor not available - this module should only be loaded in an AudioWorklet context');
+}

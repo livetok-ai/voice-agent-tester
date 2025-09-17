@@ -13,6 +13,9 @@ const PORT = process.env.HTTP_PORT || process.env.PORT || 3000;
 // Serve static assets from the assets folder
 app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
 
+// Serve JavaScript files
+app.use('/javascript', express.static(path.join(__dirname, '..', 'javascript')));
+
 // Basic health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
