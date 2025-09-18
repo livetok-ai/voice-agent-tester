@@ -1,7 +1,8 @@
 let i = 0;
 
-// Store original Audio constructor
+// Store original Audio constructor and createElement
 const OriginalAudio = window.Audio;
+const originalCreateElement = document.createElement;
 
 // Set to track programmatically created Audio instances
 const programmaticAudioInstances = new Set();
@@ -61,15 +62,35 @@ class AudioElementMonitor {
     const monitor = this;
 
     // Override Audio constructor
-    window.Audio = function(src) {
+    window.Audio = function (src) {
       const audioElement = new OriginalAudio(src);
       const elementId = monitor.getElementId(audioElement);
-      
+
       programmaticAudioInstances.add(audioElement);
       monitor.setupProgrammaticAudioElement(audioElement, elementId);
-      
+
       console.log(`Programmatic Audio created: ${elementId} with src: ${src || 'none'}`);
       return audioElement;
+    };
+
+    window.Audio.prototype.play = function () {
+      console.log(`Programmatic audio play called: ${this.src || this.srcObject}`);
+      monitor.handleProgrammaticAudioPlay(this, this.srcObject);
+      return originalPlay.apply(this, arguments);
+    };
+
+    // Override document.createElement to catch audio elements
+    document.createElement = function(tagName) {
+      const element = originalCreateElement.call(this, tagName);
+
+      if (tagName.toLowerCase() === 'audio') {
+        const elementId = monitor.getElementId(element);
+        programmaticAudioInstances.add(element);
+        monitor.setupProgrammaticAudioElement(element, elementId);
+        console.log(`Programmatic audio element created via createElement: ${elementId}`);
+      }
+
+      return element;
     };
 
     // Preserve original constructor properties
@@ -190,33 +211,33 @@ class AudioElementMonitor {
 
   setupProgrammaticAudioElement(audioElement, elementId) {
     const monitor = this;
-    
+
     // Set up property interceptors for src and srcObject changes
     this.setupProgrammaticPropertyInterceptors(audioElement, elementId);
-    
+
     // Override methods specifically for this instance
     const originalPlay = audioElement.play;
     const originalPause = audioElement.pause;
     const originalLoad = audioElement.load;
-    
-    audioElement.play = function() {
+
+    audioElement.play = function () {
       console.log(`Programmatic audio play called: ${elementId}, src: ${this.src || this.srcObject}`);
       monitor.handleProgrammaticAudioPlay(this, elementId);
       return originalPlay.apply(this, arguments);
     };
 
-    audioElement.pause = function() {
+    audioElement.pause = function () {
       console.log(`Programmatic audio pause called: ${elementId}`);
       monitor.handleProgrammaticAudioPause(this, elementId);
       return originalPause.apply(this, arguments);
     };
 
-    audioElement.load = function() {
+    audioElement.load = function () {
       console.log(`Programmatic audio load called: ${elementId}, src: ${this.src || this.srcObject}`);
       monitor.handleProgrammaticAudioLoad(this, elementId);
       return originalLoad.apply(this, arguments);
     };
-    
+
     // Set up event listeners
     const events = ['play', 'pause', 'ended', 'loadstart', 'canplay', 'loadeddata'];
     events.forEach(eventType => {
@@ -248,7 +269,7 @@ class AudioElementMonitor {
       },
       set(value) {
         const previousValue = this.src;
-        
+
         if (originalSrcDescriptor && originalSrcDescriptor.set) {
           originalSrcDescriptor.set.call(this, value);
         } else {
@@ -256,7 +277,7 @@ class AudioElementMonitor {
         }
 
         console.log(`Programmatic audio src changed: ${elementId} from ${previousValue} to ${value}`);
-        
+
         if (previousValue !== value && value) {
           monitor.handleProgrammaticAudioSrcChange(audioElement, elementId);
         }
@@ -513,6 +534,11 @@ class AudioElementMonitor {
     // Restore original Audio constructor
     if (OriginalAudio) {
       window.Audio = OriginalAudio;
+    }
+
+    // Restore original createElement
+    if (originalCreateElement) {
+      document.createElement = originalCreateElement;
     }
 
     // Clear programmatic instances
