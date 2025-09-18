@@ -13,29 +13,36 @@ let currentMediaStream = null;
 let silenceSourceNode = null;
 let speakAudioContext = null;
 
-// Create AudioContext and setup silence generation
+// Create AudioContext and setup silence generation (singleton pattern)
 function createControlledMediaStream() {
+  // Return existing stream if already created
+  if (currentMediaStream) {
+    console.log("🎤 Returning existing controlled MediaStream (singleton)");
+    return currentMediaStream;
+  }
+
   if (!currentAudioContext) {
     currentAudioContext = new (window.AudioContext || window.webkitAudioContext)();
   }
-  
+
   // Create a MediaStreamDestination to output our controlled audio
   const destination = currentAudioContext.createMediaStreamDestination();
-  
+
   // Create gain node for volume control
   currentGainNode = currentAudioContext.createGain();
   currentGainNode.connect(destination);
-  
+
   // Start with silence - create an oscillator with zero gain
   silenceSourceNode = currentAudioContext.createOscillator();
   const silenceGain = currentAudioContext.createGain();
   silenceGain.gain.setValueAtTime(0, currentAudioContext.currentTime);
-  
+
   silenceSourceNode.connect(silenceGain);
   silenceGain.connect(currentGainNode);
   silenceSourceNode.start();
-  
+
   currentMediaStream = destination.stream;
+  console.log("🎤 Created new controlled MediaStream (singleton)");
   return currentMediaStream;
 }
 
