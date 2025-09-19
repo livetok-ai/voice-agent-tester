@@ -31,7 +31,7 @@ const argv = yargs(hideBin(process.argv))
     alias: 'a',
     type: 'string',
     description: 'Assets server URL',
-    default: `http://localhost:${process.env.HTTP_PORT || process.env.PORT || 3000}`
+    default: `http://localhost:${process.env.HTTP_PORT || process.env.PORT || 3333}`
   })
   .option('report', {
     alias: 'r',
@@ -90,8 +90,15 @@ async function main() {
     const repetitions = argv.repeat || 1;
     console.log(`Running scenario ${repetitions} time(s)`);
 
-    // Create a single report generator if report is requested
-    const reportGenerator = argv.report ? new ReportGenerator(argv.report) : null;
+    // Create a single report generator for metrics tracking (always create one to track metrics)
+    const reportGenerator = new ReportGenerator(argv.report || 'temp_metrics.csv');
+
+    // Track results for final summary
+    const results = {
+      successful: 0,
+      failed: 0,
+      errors: []
+    };
 
     for (let i = 1; i <= repetitions; i++) {
       if (repetitions > 1) {
@@ -107,26 +114,54 @@ async function main() {
 
       try {
         await tester.runScenario(targetUrl, config.steps || []);
-        
+        results.successful++;
+
         if (repetitions > 1) {
-          console.log(`=== Completed repetition ${i} of ${repetitions} ===`);
+          console.log(`=== ✅ Completed repetition ${i} of ${repetitions} successfully ===`);
         }
       } catch (error) {
-        console.error(`Error in repetition ${i}:`, error.message);
-        throw error;
+        results.failed++;
+        results.errors.push({ repetition: i, error: error.message });
+        console.error(`❌ Error in repetition ${i}:`, error.message);
+
+        if (repetitions > 1) {
+          console.log(`=== ❌ Repetition ${i} of ${repetitions} failed, continuing with next... ===`);
+        }
       }
-      
+
       // Browser is automatically closed after each runScenario call
       // No need to manually close it here
     }
 
-    // Generate the final report if requested
-    if (reportGenerator) {
+    // Generate the final report if requested, and always show metrics summary
+    if (argv.report) {
       reportGenerator.generateCSV();
+    }
+    reportGenerator.generateMetricsSummary();
+
+    // Print final summary
+    console.log(`\n📊 Final Results Summary:`);
+    console.log(`✅ Successful repetitions: ${results.successful}/${repetitions}`);
+    console.log(`❌ Failed repetitions: ${results.failed}/${repetitions}`);
+
+    if (results.failed > 0) {
+      console.log(`\n🔍 Failure Details:`);
+      results.errors.forEach(({ repetition, error }) => {
+        console.log(`  Repetition ${repetition}: ${error}`);
+      });
     }
 
     if (repetitions > 1) {
-      console.log(`\n✅ All ${repetitions} repetitions completed successfully`);
+      if (results.failed === 0) {
+        console.log(`\n🎉 All ${repetitions} repetitions completed successfully!`);
+      } else {
+        console.log(`\n⚠️  ${repetitions} repetitions completed with ${results.failed} failure(s).`);
+      }
+    }
+
+    // Exit with appropriate code based on results
+    if (results.failed > 0) {
+      process.exit(1);
     }
   } catch (error) {
     console.error('Error running scenario:', error.message);
