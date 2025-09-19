@@ -14,9 +14,8 @@ export class VoiceAgentTester {
     this.headless = options.headless || false;
     this.browser = null;
     this.page = null;
-    this.audioEventQueue = [];
     this.pendingPromises = new Map(); // Map of eventType -> Array of {resolve, reject, timeoutId}
-    const defaultPort = process.env.HTTP_PORT || process.env.PORT || 3000;
+    const defaultPort = process.env.HTTP_PORT || process.env.PORT || 3333;
     this.assetsServerUrl = options.assetsServerUrl || `http://localhost:${defaultPort}`;
     this.reportGenerator = options.reportGenerator || null;
   }
@@ -27,14 +26,6 @@ export class VoiceAgentTester {
 
   waitForAudioEvent(eventType, timeout = 30000) {
     return new Promise((resolve, reject) => {
-      // First check if we already have the event in queue
-      const existingEventIndex = this.audioEventQueue.findIndex(event => event.eventType === eventType);
-      if (existingEventIndex !== -1) {
-        const event = this.audioEventQueue.splice(existingEventIndex, 1)[0];
-        resolve(event);
-        return;
-      }
-
       // Set up timeout
       const timeoutId = setTimeout(() => {
         // Remove this promise from pending list
@@ -58,7 +49,6 @@ export class VoiceAgentTester {
   }
 
   clearAudioEventQueue() {
-    this.audioEventQueue = [];
     // Also clear any pending promises and reject them
     for (const [eventType, promises] of this.pendingPromises.entries()) {
       for (const { reject, timeoutId } of promises) {
@@ -109,9 +99,6 @@ export class VoiceAgentTester {
         }
 
         resolve(event);
-      } else {
-        // No pending promises, add to queue for later
-        this.audioEventQueue.push(event);
       }
     });
 
@@ -157,7 +144,9 @@ export class VoiceAgentTester {
     for (const jsFile of jsFiles) {
       try {
         await this.page.addScriptTag({ path: jsFile });
-        console.log(`Injected: ${path.basename(jsFile)}`);
+        if (this.verbose) {
+          console.log(`Injected: ${path.basename(jsFile)}`);
+        }
       } catch (error) {
         console.error(`Error injecting ${jsFile}:`, error.message);
       }
@@ -178,10 +167,10 @@ export class VoiceAgentTester {
           await this.handleClick(step);
           break;
         case 'wait_for_voice':
-          await this.handleWaitForVoice(step);
+          await this.handleWaitForVoice();
           break;
         case 'wait_for_silence':
-          await this.handleWaitForSilence(step);
+          await this.handleWaitForSilence();
           break;
         case 'wait':
           await this.handleWait(step);
@@ -200,6 +189,12 @@ export class VoiceAgentTester {
           break;
         case 'type':
           await this.handleType(step);
+          break;
+        case 'fill':
+          await this.handleFill(step);
+          break;
+        case 'select':
+          await this.handleSelect(step);
           break;
         case 'screenshot':
           await this.handleScreenshot(step);
@@ -233,7 +228,7 @@ export class VoiceAgentTester {
     await this.page.click(selector);
   }
 
-  async handleWaitForVoice(step) {
+  async handleWaitForVoice() {
     try {
       await this.waitForAudioEvent('audiostart');
     } catch (error) {
@@ -242,7 +237,7 @@ export class VoiceAgentTester {
     }
   }
 
-  async handleWaitForSilence(step) {
+  async handleWaitForSilence() {
     try {
       await this.waitForAudioEvent('audiostop');
     } catch (error) {
@@ -407,6 +402,152 @@ export class VoiceAgentTester {
     await this.page.type(selector, text);
   }
 
+  async handleFill(step) {
+    const selector = step.selector;
+    const text = step.text;
+
+    if (!selector) {
+      throw new Error('No selector specified for fill action');
+    }
+
+    if (text === undefined) {
+      throw new Error('No text specified for fill action');
+    }
+
+    // Wait for the element to be available
+    await this.page.waitForSelector(selector);
+
+    // Use $eval for cleaner element manipulation
+    await this.page.$eval(selector, (el, value) => {
+      // Check if it's an input or textarea element
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+        el.value = value;
+        // Trigger input event to notify any listeners
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        throw new Error(`Fill action can only be used on input or textarea elements, found: ${el.tagName}`);
+      }
+    }, text);
+  }
+
+  async handleSelect(step) {
+    const selector = step.selector;
+    const value = step.value;
+    const values = step.values;
+    const text = step.text;
+    const checked = step.checked;
+
+    if (!selector) {
+      throw new Error('No selector specified for select action');
+    }
+
+    // Wait for the element to be available
+    await this.page.waitForSelector(selector);
+
+    // Determine the element type and handle accordingly
+    const elementInfo = await this.page.$eval(selector, (el) => {
+      return {
+        tagName: el.tagName,
+        type: el.type || null,
+        multiple: el.multiple || false
+      };
+    });
+
+    switch (elementInfo.tagName) {
+      case 'SELECT':
+        await this.handleSelectDropdown(selector, value, values, text, elementInfo.multiple);
+        break;
+      case 'INPUT':
+        if (elementInfo.type === 'checkbox') {
+          await this.handleSelectCheckbox(selector, checked);
+        } else if (elementInfo.type === 'radio') {
+          await this.handleSelectRadio(selector);
+        } else {
+          throw new Error(`Select action not supported for input type: ${elementInfo.type}`);
+        }
+        break;
+      default:
+        // For custom dropdowns or clickable elements, try clicking
+        await this.handleSelectCustom(selector, text);
+    }
+  }
+
+  async handleSelectDropdown(selector, value, values, text, isMultiple) {
+    if (values && Array.isArray(values)) {
+      // Multiple values for multi-select
+      if (!isMultiple) {
+        throw new Error('Cannot select multiple values on a single-select dropdown');
+      }
+      await this.page.select(selector, ...values);
+    } else if (value !== undefined) {
+      // Single value selection
+      await this.page.select(selector, value);
+    } else if (text !== undefined) {
+      // Select by visible text when no value attribute
+      await this.page.$eval(selector, (selectEl, optionText) => {
+        const option = Array.from(selectEl.options).find(opt =>
+          opt.textContent.trim() === optionText.trim()
+        );
+        if (!option) {
+          throw new Error(`Option with text "${optionText}" not found`);
+        }
+        selectEl.value = option.value;
+        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+        selectEl.dispatchEvent(new Event('input', { bubbles: true }));
+      }, text);
+    } else {
+      throw new Error('No value, values, or text specified for select dropdown');
+    }
+  }
+
+  async handleSelectCheckbox(selector, checked) {
+    const currentState = await this.page.$eval(selector, el => el.checked);
+    const targetState = checked !== undefined ? checked : !currentState;
+
+    if (currentState !== targetState) {
+      await this.page.click(selector);
+    }
+  }
+
+  async handleSelectRadio(selector) {
+    // For radio buttons, always click to select
+    await this.page.click(selector);
+  }
+
+  async handleSelectCustom(selector, text) {
+    if (text !== undefined) {
+      // For custom dropdowns, try to find and click an option with matching text
+      await this.page.evaluate((parentSelector, optionText) => {
+        const parent = document.querySelector(parentSelector);
+        if (!parent) {
+          throw new Error(`Custom dropdown not found: ${parentSelector}`);
+        }
+
+        // Try different selectors for options
+        const possibleSelectors = ['[role="option"]', 'li', 'a', '.option', 'div'];
+        let option = null;
+
+        for (const sel of possibleSelectors) {
+          const options = parent.querySelectorAll(sel);
+          option = Array.from(options).find(opt =>
+            opt.textContent.trim() === optionText.trim()
+          );
+          if (option) break;
+        }
+
+        if (!option) {
+          throw new Error(`Option with text "${optionText}" not found in custom dropdown`);
+        }
+
+        option.click();
+      }, selector, text);
+    } else {
+      // If no text specified, just click the element itself
+      await this.page.click(selector);
+    }
+  }
+
   async handleScreenshot(step) {
     if (!this.page) {
       throw new Error('Browser not launched. Call launch() first.');
@@ -554,12 +695,16 @@ export class VoiceAgentTester {
       // Keep the browser open for a bit after all steps
       await this.sleep(5000);
 
-      // Finish this run for report generation
+    } catch (error) {
+      // Log the error but still finish the run for report generation
+      console.error('Error during scenario execution:', error.message);
+      throw error;
+    } finally {
+      // Always finish the run for report generation, even if there was an error
       if (this.reportGenerator) {
         this.reportGenerator.finishRun();
       }
 
-    } finally {
       await this.close();
     }
   }
