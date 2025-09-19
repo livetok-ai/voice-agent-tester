@@ -96,15 +96,24 @@ export class ReportGenerator {
         const min = Math.min(...times);
         const max = Math.max(...times);
 
-        console.log(`${columnName}:`);
-        if (times.length > 1) {
-          console.log(`  Average: ${(average / 1000).toFixed(3)} seconds`);
-          console.log(`  Min: ${(min / 1000).toFixed(3)} seconds`);
-          console.log(`  Max: ${(max / 1000).toFixed(3)} seconds`);
-          console.log(`  Runs: ${times.length}`);
+        // Calculate p50 (median)
+        const sortedTimes = [...times].sort((a, b) => a - b);
+        let p50;
+        if (sortedTimes.length % 2 === 0) {
+          // Even number of samples: average of two middle values
+          const mid1 = sortedTimes[sortedTimes.length / 2 - 1];
+          const mid2 = sortedTimes[sortedTimes.length / 2];
+          p50 = (mid1 + mid2) / 2;
         } else {
-          console.log(`  Time: ${(times[0] / 1000).toFixed(3)} seconds`);
+          // Odd number of samples: middle value
+          p50 = sortedTimes[Math.floor(sortedTimes.length / 2)];
         }
+
+        console.log(`${columnName}:`);
+        console.log(`  Average: ${Math.round(average)}ms`);
+        console.log(`  Min: ${Math.round(min)}ms`);
+        console.log(`  Max: ${Math.round(max)}ms`);
+        console.log(`  p50: ${Math.round(p50)}ms`);
         console.log('');
       }
     });

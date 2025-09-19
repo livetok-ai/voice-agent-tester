@@ -139,10 +139,8 @@ async function main() {
     }
     reportGenerator.generateMetricsSummary();
 
-    // Print final summary
-    console.log(`\n📊 Final Results Summary:`);
+    console.log(`\n📝 Config file: ${argv.config}`);
     console.log(`✅ Successful repetitions: ${results.successful}/${repetitions}`);
-    console.log(`❌ Failed repetitions: ${results.failed}/${repetitions}`);
 
     if (results.failed > 0) {
       console.log(`\n🔍 Failure Details:`);
