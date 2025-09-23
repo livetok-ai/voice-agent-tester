@@ -73,14 +73,14 @@ class AudioElementMonitor {
       return audioElement;
     };
 
-    window.Audio.prototype.play = function () {
-      console.log(`Programmatic audio play called: ${this.src || this.srcObject}`);
-      monitor.handleProgrammaticAudioPlay(this, this.srcObject);
-      return originalPlay.apply(this, arguments);
-    };
+    // window.Audio.prototype.play = function () {
+    //   console.log(`Programmatic audio play called: ${this.src || this.srcObject}`);
+    //   monitor.handleProgrammaticAudioPlay(this, this.srcObject);
+    //   return originalPlay.apply(this, arguments);
+    // };
 
     // Override document.createElement to catch audio elements
-    document.createElement = function(tagName) {
+    document.createElement = function (tagName) {
       const element = originalCreateElement.call(this, tagName);
 
       if (tagName.toLowerCase() === 'audio') {
