@@ -28,47 +28,93 @@ export HTTP_PORT=3000  # Optional: Port for assets server (default: 3000)
 ### Basic Usage
 
 ```bash
-# Run with default config file (config.yaml)
-npm start
+# Run with application and scenario
+npm start -- -a apps/livetok.yaml -s suites/appointment.yaml
 
-# Run with specific config file
-npm start -- --config config_livekit.yaml
+# Run with multiple applications and scenarios (creates matrix)
+npm start -- -a apps/app1.yaml,apps/app2.yaml -s suites/scenario1.yaml,suites/scenario2.yaml
+
+# Run all apps in a folder with all scenarios in another folder
+npm start -- -a apps/ -s suites/
 
 # Run in non-headless mode (show browser)
-npm start -- --headless false
+npm start -- -a apps/livetok.yaml -s suites/appointment.yaml --headless false
 
 # Generate performance report
-npm start -- --report test-metrics-report.csv
+npm start -- -a apps/livetok.yaml -s suites/appointment.yaml --report test-metrics-report.csv
 
-# Run scenario multiple times
-npm start -- --repeat 5
+# Run each combination multiple times
+npm start -- -a apps/livetok.yaml -s suites/appointment.yaml --repeat 5
 ```
 
 ### Command Line Arguments
 
-| Argument | Alias | Type | Default | Description |
-|----------|--------|------|---------|-------------|
-| `--config` | `-c` | string | `config.yaml` | Path to YAML configuration file |
-| `--verbose` | `-v` | boolean | `false` | Show browser console logs |
-| `--report` | `-r` | string | `null` | Generate CSV report with step elapsed times |
-| `--repeat` | | number | `1` | Number of repetitions to run the scenario |
-| `--headless` | | boolean | `true` | Run browser in headless mode |
+| Argument | Alias | Type | Required | Description |
+|----------|--------|------|----------|-------------|
+| `--applications` | `-a` | string | Yes | Comma-separated application paths or folder path |
+| `--scenarios` | `-s` | string | Yes | Comma-separated scenario paths or folder path |
+| `--verbose` | `-v` | boolean | No | Show browser console logs (default: false) |
+| `--report` | `-r` | string | No | Generate CSV report with step elapsed times |
+| `--repeat` | | number | No | Number of repetitions to run each combination (default: 1) |
+| `--headless` | | boolean | No | Run browser in headless mode (default: true) |
+| `--assets-server` | | string | No | Assets server URL (default: http://localhost:3333) |
 
-## Scenario Configuration
+## Configuration
 
-Test scenarios are defined in YAML files. Here's the basic structure:
+### Application Configuration
 
+Application configs define the URL and initial setup steps. They should be placed in the `apps/` folder.
+
+**Structure:**
 ```yaml
 url: "http://localhost:8080/demo/index.html"
 steps:
+  - action: fill
+    selector: "input[type='password']"
+    text: "your-api-key"
   - action: click
     selector: "#start"
   - action: wait_for_voice
-    metrics: elapsed_time
+  - action: wait_for_silence
+```
+
+**Key points:**
+- Must contain either `url` or `html` field
+- `steps` are optional but typically include setup actions
+- Steps run first, before scenario steps
+
+### Scenario Configuration
+
+Scenario configs define test steps to execute after the application is set up. They should be placed in the `suites/` folder.
+
+**Structure:**
+```yaml
+steps:
   - action: speak
     file: hello_make_an_appointment.mp3
+  - action: wait_for_voice
+    metrics: elapsed_time
+  - action: wait_for_silence
   - action: listen
     evaluation: "The response should greet the user"
+```
+
+**Key points:**
+- Only contains `steps` (no URL)
+- Steps run after application steps
+- Can be combined with any application
+
+### Matrix Execution
+
+When you provide multiple applications and scenarios, the tool creates a matrix and runs all combinations:
+
+```bash
+# This will run 4 combinations:
+# app1 + scenario1
+# app1 + scenario2
+# app2 + scenario1
+# app2 + scenario2
+npm start -- -a apps/app1.yaml,apps/app2.yaml -s suites/scenario1.yaml,suites/scenario2.yaml
 ```
 
 ### Supported Actions
@@ -165,25 +211,42 @@ When using `--report`, a CSV file will be generated with columns for each step t
 │   ├── audio_input_hooks.js  # Audio recording functionality
 │   ├── audio_output_hooks.js # Speech synthesis functionality
 │   └── recording-processor.js # Audio processing utilities
+├── apps/                     # Application configurations (URL + setup steps)
+│   └── livetok.yaml         # Example application config
+├── suites/                   # Scenario configurations (test steps)
+│   └── appointment.yaml     # Example scenario config
 ├── assets/                   # Audio files for speak action
-├── config.yaml              # Default scenario configuration
-├── config_*.yaml            # Additional scenario configurations
 └── package.json
 ```
 
-## Example Scenarios
+## Example
 
-### Basic Voice Interaction Test
+### Complete Example
+
+**Application config** (`apps/my_app.yaml`):
 ```yaml
 url: "http://localhost:8080/voice-app"
 steps:
   - action: click
     selector: "#start-button"
   - action: wait_for_voice
+  - action: wait_for_silence
+```
+
+**Scenario config** (`suites/greeting_test.yaml`):
+```yaml
+steps:
   - action: speak
     text: "Hello, I need help with my account"
+  - action: wait_for_voice
+    metrics: elapsed_time
   - action: listen
     evaluation: "Response should acknowledge the account help request"
+```
+
+**Run the test:**
+```bash
+npm start -- -a apps/my_app.yaml -s suites/greeting_test.yaml
 ```
 
 
