@@ -7,13 +7,13 @@ export class ReportGenerator {
     this.allRunsData = [];
     this.currentRun = new Map(); // Map of stepIndex -> Map of metricName -> value
     this.stepColumns = new Map(); // Map of stepIndex -> Map of metricName -> column name
-    this.currentRunMetadata = null; // Store app, suite, and duration info
+    this.currentRunMetadata = null; // Store app, scenario, and duration info
   }
 
-  beginRun(appName, suiteName) {
+  beginRun(appName, scenarioName) {
     this.currentRunMetadata = {
       app: appName,
-      suite: suiteName,
+      scenario: scenarioName,
       startTime: Date.now()
     };
   }
@@ -52,7 +52,7 @@ export class ReportGenerator {
       this.allRunsData.push({
         metadata: {
           app: this.currentRunMetadata?.app || '',
-          suite: this.currentRunMetadata?.suite || '',
+          scenario: this.currentRunMetadata?.scenario || '',
           duration: duration
         },
         stepMetrics: runCopy
@@ -85,8 +85,8 @@ export class ReportGenerator {
     // Sort step indices
     const sortedStepIndices = Array.from(allStepMetrics.keys()).sort((a, b) => a - b);
 
-    // Build column headers - start with app, suite, and duration
-    const headers = ['app', 'suite', 'duration'];
+    // Build column headers - start with app, scenario, and duration
+    const headers = ['app', 'scenario', 'duration'];
     sortedStepIndices.forEach(stepIndex => {
       const metricNames = Array.from(allStepMetrics.get(stepIndex)).sort();
       metricNames.forEach(metricName => {
@@ -101,7 +101,7 @@ export class ReportGenerator {
       // Start with metadata columns
       const row = [
         run.metadata.app,
-        run.metadata.suite,
+        run.metadata.scenario,
         run.metadata.duration
       ];
 

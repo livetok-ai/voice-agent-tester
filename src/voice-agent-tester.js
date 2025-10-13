@@ -631,11 +631,11 @@ export class VoiceAgentTester {
     }
   }
 
-  async runScenario(url, steps, appName = '', suiteName = '', backgroundFile = null) {
+  async runScenario(url, steps, appName = '', scenarioName = '', backgroundFile = null) {
     try {
-      // Start tracking this run with app and suite names
+      // Start tracking this run with app and scenario names
       if (this.reportGenerator) {
-        this.reportGenerator.beginRun(appName, suiteName);
+        this.reportGenerator.beginRun(appName, scenarioName);
       }
 
       await this.launch();

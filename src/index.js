@@ -55,7 +55,8 @@ function loadApplicationConfig(configPath) {
     path: configPath,
     url: config.url,
     html: config.html,
-    steps: config.steps || []
+    steps: config.steps || [],
+    tags: config.tags || []
   };
 }
 
@@ -67,7 +68,9 @@ function loadScenarioConfig(configPath) {
   return {
     name: path.basename(configPath, path.extname(configPath)),
     path: configPath,
-    steps: config.steps || []
+    steps: config.steps || [],
+    background: config.background || null,
+    tags: config.tags || []
   };
 }
 
@@ -112,6 +115,16 @@ const argv = yargs(hideBin(process.argv))
     description: 'Run browser in headless mode',
     default: true
   })
+  .option('application-tags', {
+    type: 'string',
+    description: 'Comma-separated list of application tags to filter by',
+    default: null
+  })
+  .option('scenario-tags', {
+    type: 'string',
+    description: 'Comma-separated list of scenario tags to filter by',
+    default: null
+  })
   .help()
   .argv;
 
@@ -136,8 +149,30 @@ async function main() {
     }
 
     // Load all application and scenario configs
-    const applications = applicationPaths.map(loadApplicationConfig);
-    const scenarios = scenarioPaths.map(loadScenarioConfig);
+    let applications = applicationPaths.map(loadApplicationConfig);
+    let scenarios = scenarioPaths.map(loadScenarioConfig);
+
+    // Filter applications by tags if specified
+    if (argv.applicationTags) {
+      const filterTags = argv.applicationTags.split(',').map(t => t.trim());
+      applications = applications.filter(app =>
+        app.tags.some(tag => filterTags.includes(tag))
+      );
+      if (applications.length === 0) {
+        throw new Error(`No applications found with tags: ${filterTags.join(', ')}`);
+      }
+    }
+
+    // Filter scenarios by tags if specified
+    if (argv.scenarioTags) {
+      const filterTags = argv.scenarioTags.split(',').map(t => t.trim());
+      scenarios = scenarios.filter(scenario =>
+        scenario.tags.some(tag => filterTags.includes(tag))
+      );
+      if (scenarios.length === 0) {
+        throw new Error(`No scenarios found with tags: ${filterTags.join(', ')}`);
+      }
+    }
 
     console.log(`\n📋 Loaded ${applications.length} application(s) and ${scenarios.length} scenario(s)`);
     console.log(`Applications: ${applications.map(a => a.name).join(', ')}`);
@@ -249,7 +284,6 @@ async function main() {
     console.log(`📊 FINAL SUMMARY`);
     console.log(`${'='.repeat(80)}`);
     console.log(`✅ Successful runs: ${results.successful}/${totalRuns}`);
-    console.log(`❌ Failed runs: ${results.failed}/${totalRuns}`);
 
     if (results.failed > 0) {
       console.log(`\n🔍 Failure Details:`);
