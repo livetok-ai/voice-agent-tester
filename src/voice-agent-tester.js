@@ -224,12 +224,15 @@ export class VoiceAgentTester {
 
       // Record metrics for report if enabled and step has metrics attribute
       if (this.reportGenerator && step.metrics) {
+        if (step.metrics.includes('elapsed_time')) {
         this.reportGenerator.recordStepMetric(stepIndex, step.action, 'elapsed_time', elapsedTimeMs);
-
+        }
         // Record any additional metrics returned by the handler
         if (handlerResult && typeof handlerResult === 'object') {
           for (const [metricName, metricValue] of Object.entries(handlerResult)) {
+            if (step.metrics.includes(metricName)) {
             this.reportGenerator.recordStepMetric(stepIndex, step.action, metricName, metricValue);
+            }
           }
         }
       }
@@ -628,8 +631,13 @@ export class VoiceAgentTester {
     }
   }
 
-  async runScenario(url, steps) {
+  async runScenario(url, steps, appName = '', suiteName = '', backgroundFile = null) {
     try {
+      // Start tracking this run with app and suite names
+      if (this.reportGenerator) {
+        this.reportGenerator.beginRun(appName, suiteName);
+      }
+
       await this.launch();
 
       await this.page.goto(url);
@@ -657,7 +665,7 @@ export class VoiceAgentTester {
     } finally {
       // Always finish the run for report generation, even if there was an error
       if (this.reportGenerator) {
-        this.reportGenerator.finishRun();
+        this.reportGenerator.endRun();
       }
 
       await this.close();

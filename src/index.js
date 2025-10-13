@@ -195,7 +195,7 @@ async function main() {
 
       // Combine application steps with scenario steps
       const combinedSteps = [...app.steps, ...scenario.steps];
-      console.log(`Total steps: ${combinedSteps.length} (${app.steps.length} app + ${scenario.steps.length} scenario)\n`);
+      console.log(`Total steps: ${combinedSteps.length} (${app.steps.length} from app + ${scenario.steps.length} from suite)\n`);
 
       // Run repetitions for this combination
       const repetitions = argv.repeat || 1;
@@ -217,7 +217,7 @@ async function main() {
         });
 
         try {
-          await tester.runScenario(targetUrl, combinedSteps);
+          await tester.runScenario(targetUrl, combinedSteps, app.name, scenario.name, scenario.background);
           results.successful++;
 
           if (repetitions > 1) {

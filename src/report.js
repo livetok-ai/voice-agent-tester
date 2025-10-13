@@ -7,6 +7,15 @@ export class ReportGenerator {
     this.allRunsData = [];
     this.currentRun = new Map(); // Map of stepIndex -> Map of metricName -> value
     this.stepColumns = new Map(); // Map of stepIndex -> Map of metricName -> column name
+    this.currentRunMetadata = null; // Store app, suite, and duration info
+  }
+
+  beginRun(appName, suiteName) {
+    this.currentRunMetadata = {
+      app: appName,
+      suite: suiteName,
+      startTime: Date.now()
+    };
   }
 
   recordStepMetric(stepIndex, action, name, value) {
@@ -27,15 +36,30 @@ export class ReportGenerator {
     }
   }
 
-  finishRun() {
-    if (this.currentRun.size > 0) {
+  endRun() {
+    if (this.currentRun.size > 0 || this.currentRunMetadata) {
+      // Calculate duration
+      const duration = this.currentRunMetadata
+        ? Date.now() - this.currentRunMetadata.startTime
+        : 0;
+
       // Deep copy the nested Map structure
       const runCopy = new Map();
       this.currentRun.forEach((metricsMap, stepIndex) => {
         runCopy.set(stepIndex, new Map(metricsMap));
       });
-      this.allRunsData.push(runCopy);
+
+      this.allRunsData.push({
+        metadata: {
+          app: this.currentRunMetadata?.app || '',
+          suite: this.currentRunMetadata?.suite || '',
+          duration: duration
+        },
+        stepMetrics: runCopy
+      });
+
       this.currentRun = new Map();
+      this.currentRunMetadata = null;
     }
   }
 
@@ -48,7 +72,7 @@ export class ReportGenerator {
     // Collect all step indices and their metrics
     const allStepMetrics = new Map(); // Map of stepIndex -> Set of metricNames
     this.allRunsData.forEach(run => {
-      run.forEach((metrics, stepIndex) => {
+      run.stepMetrics.forEach((metrics, stepIndex) => {
         if (!allStepMetrics.has(stepIndex)) {
           allStepMetrics.set(stepIndex, new Set());
         }
@@ -61,8 +85,8 @@ export class ReportGenerator {
     // Sort step indices
     const sortedStepIndices = Array.from(allStepMetrics.keys()).sort((a, b) => a - b);
 
-    // Build column headers
-    const headers = [];
+    // Build column headers - start with app, suite, and duration
+    const headers = ['app', 'suite', 'duration'];
     sortedStepIndices.forEach(stepIndex => {
       const metricNames = Array.from(allStepMetrics.get(stepIndex)).sort();
       metricNames.forEach(metricName => {
@@ -74,9 +98,16 @@ export class ReportGenerator {
 
     // Create CSV data rows
     const dataRows = this.allRunsData.map(run => {
-      const row = [];
+      // Start with metadata columns
+      const row = [
+        run.metadata.app,
+        run.metadata.suite,
+        run.metadata.duration
+      ];
+
+      // Add step metrics
       sortedStepIndices.forEach(stepIndex => {
-        const stepMetrics = run.get(stepIndex) || new Map();
+        const stepMetrics = run.stepMetrics.get(stepIndex) || new Map();
         const metricNames = Array.from(allStepMetrics.get(stepIndex)).sort();
         metricNames.forEach(metricName => {
           const value = stepMetrics.get(metricName);
@@ -103,7 +134,7 @@ export class ReportGenerator {
     // Collect all step indices and their metrics
     const allStepMetrics = new Map(); // Map of stepIndex -> Set of metricNames
     this.allRunsData.forEach(run => {
-      run.forEach((metrics, stepIndex) => {
+      run.stepMetrics.forEach((metrics, stepIndex) => {
         if (!allStepMetrics.has(stepIndex)) {
           allStepMetrics.set(stepIndex, new Set());
         }
@@ -129,7 +160,7 @@ export class ReportGenerator {
         const values = [];
 
         this.allRunsData.forEach(run => {
-          const stepMetrics = run.get(stepIndex);
+          const stepMetrics = run.stepMetrics.get(stepIndex);
           if (stepMetrics && stepMetrics.has(metricName)) {
             values.push(stepMetrics.get(metricName));
           }
