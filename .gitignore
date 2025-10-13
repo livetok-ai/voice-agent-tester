@@ -106,3 +106,6 @@ Thumbs.db
 *.yaml
 *.yml
 *.csv
+
+# Output files
+output/
