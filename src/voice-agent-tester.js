@@ -175,42 +175,43 @@ export class VoiceAgentTester {
     const beginTime = Date.now();
 
     try {
+      let handlerResult;
       switch (action) {
         case 'click':
-          await this.handleClick(step);
+          handlerResult = await this.handleClick(step);
           break;
         case 'wait_for_voice':
-          await this.handleWaitForVoice();
+          handlerResult = await this.handleWaitForVoice();
           break;
         case 'wait_for_silence':
-          await this.handleWaitForSilence();
+          handlerResult = await this.handleWaitForSilence();
           break;
         case 'wait':
-          await this.handleWait(step);
+          handlerResult = await this.handleWait(step);
           break;
         case 'speak':
-          await this.handleSpeak(step);
+          handlerResult = await this.handleSpeak(step);
           break;
         case 'listen':
-          await this.handleListen(step);
+          handlerResult = await this.handleListen(step);
           break;
         case 'sleep':
-          await this.handleSleep(step);
+          handlerResult = await this.handleSleep(step);
           break;
         case 'wait_for_element':
-          await this.handleWaitForElement(step);
+          handlerResult = await this.handleWaitForElement(step);
           break;
         case 'type':
-          await this.handleType(step);
+          handlerResult = await this.handleType(step);
           break;
         case 'fill':
-          await this.handleFill(step);
+          handlerResult = await this.handleFill(step);
           break;
         case 'select':
-          await this.handleSelect(step);
+          handlerResult = await this.handleSelect(step);
           break;
         case 'screenshot':
-          await this.handleScreenshot(step);
+          handlerResult = await this.handleScreenshot(step);
           break;
         default:
           console.log(`Unknown action: ${action}`);
@@ -221,9 +222,16 @@ export class VoiceAgentTester {
       const elapsedTimeSec = elapsedTimeMs / 1000;
       console.log(`\tElapsed time: ${elapsedTimeSec.toFixed(3)} seconds`);
 
-      // Record step time for report if enabled and step has metrics attribute
+      // Record metrics for report if enabled and step has metrics attribute
       if (this.reportGenerator && step.metrics) {
-        this.reportGenerator.recordStepTime(stepIndex, elapsedTimeMs, step.action);
+        this.reportGenerator.recordStepMetric(stepIndex, step.action, 'elapsed_time', elapsedTimeMs);
+
+        // Record any additional metrics returned by the handler
+        if (handlerResult && typeof handlerResult === 'object') {
+          for (const [metricName, metricValue] of Object.entries(handlerResult)) {
+            this.reportGenerator.recordStepMetric(stepIndex, step.action, metricName, metricValue);
+          }
+        }
       }
     } catch (error) {
       console.error(`Error executing step ${action}:`, error.message);

@@ -5,22 +5,36 @@ export class ReportGenerator {
   constructor(filePath) {
     this.filePath = path.resolve(filePath);
     this.allRunsData = [];
-    this.currentRun = new Map(); // Map of stepIndex -> {time, action}
-    this.stepColumns = new Map(); // Map of stepIndex -> column name
+    this.currentRun = new Map(); // Map of stepIndex -> Map of metricName -> value
+    this.stepColumns = new Map(); // Map of stepIndex -> Map of metricName -> column name
   }
 
-  recordStepTime(stepIndex, elapsedTimeMs, action) {
-    this.currentRun.set(stepIndex, { time: elapsedTimeMs, action });
-    
-    // Track column names based on step index and action
+  recordStepMetric(stepIndex, action, name, value) {
+    // Initialize step metrics map if it doesn't exist
+    if (!this.currentRun.has(stepIndex)) {
+      this.currentRun.set(stepIndex, new Map());
+    }
+
+    // Record the metric value
+    this.currentRun.get(stepIndex).set(name, value);
+
+    // Track column names based on step index, action, and metric name
     if (!this.stepColumns.has(stepIndex)) {
-      this.stepColumns.set(stepIndex, `step_${stepIndex + 1}_${action}_elapsed_time`);
+      this.stepColumns.set(stepIndex, new Map());
+    }
+    if (!this.stepColumns.get(stepIndex).has(name)) {
+      this.stepColumns.get(stepIndex).set(name, `step_${stepIndex + 1}_${action}_${name}`);
     }
   }
 
   finishRun() {
     if (this.currentRun.size > 0) {
-      this.allRunsData.push(new Map(this.currentRun));
+      // Deep copy the nested Map structure
+      const runCopy = new Map();
+      this.currentRun.forEach((metricsMap, stepIndex) => {
+        runCopy.set(stepIndex, new Map(metricsMap));
+      });
+      this.allRunsData.push(runCopy);
       this.currentRun = new Map();
     }
   }
@@ -31,28 +45,48 @@ export class ReportGenerator {
       return;
     }
 
-    // Get all step indices that have metrics across all runs
-    const allStepIndices = new Set();
+    // Collect all step indices and their metrics
+    const allStepMetrics = new Map(); // Map of stepIndex -> Set of metricNames
     this.allRunsData.forEach(run => {
-      run.forEach((_, stepIndex) => allStepIndices.add(stepIndex));
+      run.forEach((metrics, stepIndex) => {
+        if (!allStepMetrics.has(stepIndex)) {
+          allStepMetrics.set(stepIndex, new Set());
+        }
+        metrics.forEach((_, metricName) => {
+          allStepMetrics.get(stepIndex).add(metricName);
+        });
+      });
     });
 
-    const sortedStepIndices = Array.from(allStepIndices).sort((a, b) => a - b);
+    // Sort step indices
+    const sortedStepIndices = Array.from(allStepMetrics.keys()).sort((a, b) => a - b);
 
-    // Create CSV header using column names from stepColumns
-    const header = sortedStepIndices.map(stepIndex =>
-      this.stepColumns.get(stepIndex) || `step_${stepIndex + 1}_elapsed_time`
-    ).join(', ');
+    // Build column headers
+    const headers = [];
+    sortedStepIndices.forEach(stepIndex => {
+      const metricNames = Array.from(allStepMetrics.get(stepIndex)).sort();
+      metricNames.forEach(metricName => {
+        const columnName = this.stepColumns.get(stepIndex)?.get(metricName) ||
+                          `step_${stepIndex + 1}_${metricName}`;
+        headers.push(columnName);
+      });
+    });
 
     // Create CSV data rows
     const dataRows = this.allRunsData.map(run => {
-      return sortedStepIndices.map(stepIndex => {
-        const stepData = run.get(stepIndex);
-        return stepData ? stepData.time : '';
-      }).join(', ');
+      const row = [];
+      sortedStepIndices.forEach(stepIndex => {
+        const stepMetrics = run.get(stepIndex) || new Map();
+        const metricNames = Array.from(allStepMetrics.get(stepIndex)).sort();
+        metricNames.forEach(metricName => {
+          const value = stepMetrics.get(metricName);
+          row.push(value !== undefined ? value : '');
+        });
+      });
+      return row.join(', ');
     });
 
-    const csvContent = `${header}\n${dataRows.join('\n')}\n`;
+    const csvContent = `${headers.join(', ')}\n${dataRows.join('\n')}\n`;
 
     // Write to file
     fs.writeFileSync(this.filePath, csvContent, 'utf8');
@@ -66,13 +100,20 @@ export class ReportGenerator {
 
     console.log('\n=== METRICS SUMMARY ===');
 
-    // Get all step indices that have metrics across all runs
-    const allStepIndices = new Set();
+    // Collect all step indices and their metrics
+    const allStepMetrics = new Map(); // Map of stepIndex -> Set of metricNames
     this.allRunsData.forEach(run => {
-      run.forEach((_, stepIndex) => allStepIndices.add(stepIndex));
+      run.forEach((metrics, stepIndex) => {
+        if (!allStepMetrics.has(stepIndex)) {
+          allStepMetrics.set(stepIndex, new Set());
+        }
+        metrics.forEach((_, metricName) => {
+          allStepMetrics.get(stepIndex).add(metricName);
+        });
+      });
     });
 
-    const sortedStepIndices = Array.from(allStepIndices).sort((a, b) => a - b);
+    const sortedStepIndices = Array.from(allStepMetrics.keys()).sort((a, b) => a - b);
 
     if (sortedStepIndices.length === 0) {
       console.log('No metrics collected during test runs.');
@@ -80,42 +121,51 @@ export class ReportGenerator {
     }
 
     sortedStepIndices.forEach(stepIndex => {
-      const columnName = this.stepColumns.get(stepIndex) || `step_${stepIndex + 1}_elapsed_time`;
-      const times = [];
+      const metricNames = Array.from(allStepMetrics.get(stepIndex)).sort();
 
-      this.allRunsData.forEach(run => {
-        const stepData = run.get(stepIndex);
-        if (stepData) {
-          times.push(stepData.time);
+      metricNames.forEach(metricName => {
+        const columnName = this.stepColumns.get(stepIndex)?.get(metricName) ||
+                          `step_${stepIndex + 1}_${metricName}`;
+        const values = [];
+
+        this.allRunsData.forEach(run => {
+          const stepMetrics = run.get(stepIndex);
+          if (stepMetrics && stepMetrics.has(metricName)) {
+            values.push(stepMetrics.get(metricName));
+          }
+        });
+
+        if (values.length > 0) {
+          const sum = values.reduce((a, b) => a + b, 0);
+          const average = sum / values.length;
+          const min = Math.min(...values);
+          const max = Math.max(...values);
+
+          // Calculate p50 (median)
+          const sortedValues = [...values].sort((a, b) => a - b);
+          let p50;
+          if (sortedValues.length % 2 === 0) {
+            // Even number of samples: average of two middle values
+            const mid1 = sortedValues[sortedValues.length / 2 - 1];
+            const mid2 = sortedValues[sortedValues.length / 2];
+            p50 = (mid1 + mid2) / 2;
+          } else {
+            // Odd number of samples: middle value
+            p50 = sortedValues[Math.floor(sortedValues.length / 2)];
+          }
+
+          // Only add "ms" unit for elapsed_time metrics
+          const unit = metricName === 'elapsed_time' ? 'ms' : '';
+          const formatValue = (val) => unit ? `${Math.round(val)}${unit}` : val.toFixed(2);
+
+          console.log(`${columnName}:`);
+          console.log(`  Average: ${formatValue(average)}`);
+          console.log(`  Min: ${formatValue(min)}`);
+          console.log(`  Max: ${formatValue(max)}`);
+          console.log(`  p50: ${formatValue(p50)}`);
+          console.log('');
         }
       });
-
-      if (times.length > 0) {
-        const sum = times.reduce((a, b) => a + b, 0);
-        const average = sum / times.length;
-        const min = Math.min(...times);
-        const max = Math.max(...times);
-
-        // Calculate p50 (median)
-        const sortedTimes = [...times].sort((a, b) => a - b);
-        let p50;
-        if (sortedTimes.length % 2 === 0) {
-          // Even number of samples: average of two middle values
-          const mid1 = sortedTimes[sortedTimes.length / 2 - 1];
-          const mid2 = sortedTimes[sortedTimes.length / 2];
-          p50 = (mid1 + mid2) / 2;
-        } else {
-          // Odd number of samples: middle value
-          p50 = sortedTimes[Math.floor(sortedTimes.length / 2)];
-        }
-
-        console.log(`${columnName}:`);
-        console.log(`  Average: ${Math.round(average)}ms`);
-        console.log(`  Min: ${Math.round(min)}ms`);
-        console.log(`  Max: ${Math.round(max)}ms`);
-        console.log(`  p50: ${Math.round(p50)}ms`);
-        console.log('');
-      }
     });
   }
 }
