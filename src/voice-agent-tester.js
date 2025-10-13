@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { glob } from 'glob';
 import puppeteer from 'puppeteer';
-import OpenAI from 'openai';
+import { transcribeAudio, evaluateTranscription, pcmToWav } from './transcription.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -108,6 +108,14 @@ export class VoiceAgentTester {
         console.log(`[BROWSER] ${msg.text()}`);
       });
     }
+
+    // Always listen for page errors
+    this.page.on('pageerror', (error) => {
+      console.error(`[PAGE ERROR] ${error.message}`);
+      if (this.verbose) {
+        console.error(error.stack);
+      }
+    });
   }
 
   async close() {
@@ -131,6 +139,11 @@ export class VoiceAgentTester {
     if (!this.page) {
       throw new Error('Browser not launched. Call launch() first.');
     }
+
+    // Set the assets server URL in the page context before injecting scripts
+    await this.page.evaluate((url) => {
+      window.__assetsServerUrl = url;
+    }, this.assetsServerUrl);
 
     const jsFolder = path.join(__dirname, '..', 'javascript');
 
@@ -258,7 +271,7 @@ export class VoiceAgentTester {
 
   async handleSpeak(step) {
     const text = step.text;
-    const file = step.file;
+    const file = step.file
 
     if (!text && !file) {
       throw new Error('No text or file specified for speak action');
@@ -279,9 +292,19 @@ export class VoiceAgentTester {
       const fileUrl = `${this.assetsServerUrl}/assets/${file}`;
 
       await this.page.evaluate((url) => {
+        console.log('Checking for __speakFromUrl function...');
+        console.log('typeof window.__speakFromUrl:', typeof window.__speakFromUrl);
+        console.log('typeof window.__speak:', typeof window.__speak);
+
         if (typeof window.__speakFromUrl === 'function') {
+          console.log('Calling __speakFromUrl with:', url);
           window.__speakFromUrl(url);
+        } else if (typeof window.__speak === 'function') {
+          console.log('__speakFromUrl not available, but __speak is available. Calling __speak with URL:', url);
+          window.__speak(url);
         } else {
+          console.error('Neither __speakFromUrl nor __speak is available');
+          console.log('Available window properties:', Object.keys(window).filter(k => k.startsWith('__')));
           throw new Error('__speakFromUrl method not available');
         }
       }, fileUrl);
@@ -320,17 +343,9 @@ export class VoiceAgentTester {
         }
       });
 
-      // Wait for recording to start
       await this.waitForAudioEvent('recordingstart');
-      console.log('Recording started successfully');
-
-      // Wait for voice input (audiostart event)
       await this.waitForAudioEvent('audiostart');
-      console.log('Voice input detected');
-
-      // Wait for silence (audiostop event)
       await this.waitForAudioEvent('audiostop');
-      console.log('Silence detected, stopping recording');
 
       // Stop recording
       await this.page.evaluate(() => {
@@ -343,21 +358,28 @@ export class VoiceAgentTester {
 
       // Wait for recording to complete and get the audio data
       const recordingEvent = await this.waitForAudioEvent('recordingcomplete');
-      console.log('Recording completed');
 
-      // Process the audio with OpenAI
       const audioMetadata = {
         mimeType: recordingEvent.data.mimeType,
         sampleRate: recordingEvent.data.sampleRate,
         channels: recordingEvent.data.channels,
         bitsPerSample: recordingEvent.data.bitsPerSample
       };
-      const transcription = await this.transcribeAudio(recordingEvent.data.audioData, audioMetadata);
-      console.log(`Transcription: ${transcription}`);
+
+      const audioFilePath = await this.saveAudioAsWAV(recordingEvent.data.audioData, audioMetadata);
+      console.log(`\tAudio saved as: ${audioFilePath}`);
+
+      // Process the audio with OpenAI
+      const transcription = await transcribeAudio(audioFilePath);
+      console.log(`\tTranscription: ${transcription}`);
 
       // Evaluate the transcription against the evaluation prompt
-      const evaluationResult = await this.evaluateTranscription(transcription, evaluation);
-      console.log(`Evaluation result: ${evaluationResult}`);
+      const evaluationResult = await evaluateTranscription(transcription, evaluation);
+      console.log(`\tEvaluation result: ${evaluationResult.score} "${evaluationResult.explanation}"`);
+
+      return {
+        score: evaluationResult.score,
+      }
     } catch (error) {
       console.error('Error in listen command:', error.message);
       throw error;
@@ -573,106 +595,28 @@ export class VoiceAgentTester {
     return screenshotPath;
   }
 
-  async transcribeAudio(base64Audio, audioMetadata) {
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
-    });
-
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY environment variable is required for transcription');
-    }
-
+  async saveAudioAsWAV(base64Audio, audioMetadata) {
     try {
       // Convert base64 to buffer
       const pcmBuffer = Buffer.from(base64Audio, 'base64');
 
-      // Convert PCM to WAV format for OpenAI API
-      const wavBuffer = this.pcmToWav(pcmBuffer, audioMetadata.sampleRate, audioMetadata.channels, audioMetadata.bitsPerSample);
+      // Convert PCM to WAV format
+      const wavBuffer = pcmToWav(pcmBuffer, audioMetadata.sampleRate, audioMetadata.channels, audioMetadata.bitsPerSample);
 
-      // Create a temporary WAV file
-      const tempAudioPath = path.join(__dirname, '..', 'temp_audio.wav');
-      fs.writeFileSync(tempAudioPath, wavBuffer);
+      // Save to file
+      const outputDir = path.join(__dirname, '..', 'output');
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
 
-      // Create a file stream for OpenAI
-      const audioFile = fs.createReadStream(tempAudioPath);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const wavFilePath = path.join(outputDir, `recording_${timestamp}.wav`);
+      fs.writeFileSync(wavFilePath, wavBuffer);
 
-      const transcription = await openai.audio.transcriptions.create({
-        file: audioFile,
-        model: "whisper-1",
-      });
-
-      // Clean up temporary file
-      fs.unlinkSync(tempAudioPath);
-
-      return transcription.text;
+      return wavFilePath;
     } catch (error) {
-      console.error('Error transcribing audio:', error);
-      throw new Error(`Transcription failed: ${error.message}`);
-    }
-  }
-
-  pcmToWav(pcmBuffer, sampleRate, channels, bitsPerSample) {
-    const byteRate = sampleRate * channels * bitsPerSample / 8;
-    const blockAlign = channels * bitsPerSample / 8;
-    const dataSize = pcmBuffer.length;
-    const fileSize = 36 + dataSize;
-
-    const wavBuffer = Buffer.alloc(44 + dataSize);
-    let offset = 0;
-
-    // RIFF chunk descriptor
-    wavBuffer.write('RIFF', offset); offset += 4;
-    wavBuffer.writeUInt32LE(fileSize, offset); offset += 4;
-    wavBuffer.write('WAVE', offset); offset += 4;
-
-    // fmt sub-chunk
-    wavBuffer.write('fmt ', offset); offset += 4;
-    wavBuffer.writeUInt32LE(16, offset); offset += 4; // Sub-chunk size
-    wavBuffer.writeUInt16LE(1, offset); offset += 2; // Audio format (1 = PCM)
-    wavBuffer.writeUInt16LE(channels, offset); offset += 2;
-    wavBuffer.writeUInt32LE(sampleRate, offset); offset += 4;
-    wavBuffer.writeUInt32LE(byteRate, offset); offset += 4;
-    wavBuffer.writeUInt16LE(blockAlign, offset); offset += 2;
-    wavBuffer.writeUInt16LE(bitsPerSample, offset); offset += 2;
-
-    // data sub-chunk
-    wavBuffer.write('data', offset); offset += 4;
-    wavBuffer.writeUInt32LE(dataSize, offset); offset += 4;
-    pcmBuffer.copy(wavBuffer, offset);
-
-    return wavBuffer;
-  }
-
-  async evaluateTranscription(transcription, evaluationPrompt) {
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
-    });
-
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY environment variable is required for evaluation');
-    }
-
-    try {
-      const response = await openai.chat.completions.create({
-        model: "gpt-4",
-        messages: [
-          {
-            role: "system",
-            content: "You are an AI assistant that evaluates transcribed speech against given criteria. Provide a clear, concise evaluation result."
-          },
-          {
-            role: "user",
-            content: `Evaluation criteria: ${evaluationPrompt}\n\nTranscribed speech: "${transcription}"\n\nPlease evaluate whether the transcribed speech meets the criteria and provide your assessment.`
-          }
-        ],
-        max_tokens: 500,
-        temperature: 0.1
-      });
-
-      return response.choices[0].message.content;
-    } catch (error) {
-      console.error('Error evaluating transcription:', error);
-      throw new Error(`Evaluation failed: ${error.message}`);
+      console.error('Error saving audio as WAV:', error);
+      throw new Error(`Failed to save WAV: ${error.message}`);
     }
   }
 
@@ -684,6 +628,9 @@ export class VoiceAgentTester {
 
       // Inject JavaScript files after the page has loaded
       await this.injectJavaScriptFiles();
+
+      // Small wait to ensure injected scripts are fully loaded
+      await this.sleep(500);
 
       // Execute all configured steps
       for (let i = 0; i < steps.length; i++) {

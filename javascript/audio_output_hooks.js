@@ -592,7 +592,9 @@ window.__startRecording = async function () {
     recordingSampleRate = audioContext.sampleRate;
 
     // Load the AudioWorklet processor module
-    await audioContext.audioWorklet.addModule('/javascript/recording-processor.js');
+    const assetsServerUrl = window.__assetsServerUrl || window.location.origin;
+    const workletUrl = `${assetsServerUrl}/assets/recording-processor.js`;
+    await audioContext.audioWorklet.addModule(workletUrl);
 
     // Create the AudioWorklet node
     recordingWorkletNode = new AudioWorkletNode(audioContext, 'recording-processor');

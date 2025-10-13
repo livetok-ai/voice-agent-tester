@@ -20,8 +20,14 @@ npm install
 
 2. Set up environment variables:
 ```bash
-export HTTP_PORT=3000  # Optional: Port for assets server (default: 3000)
+# Optional: Port for assets server (default: 3333)
+export HTTP_PORT=3333
+
+# Required for 'listen' action with transcription and evaluation
+export OPENAI_API_KEY=your-openai-api-key-here
 ```
+
+**Note:** The `OPENAI_API_KEY` is only required if you're using the `listen` action, which transcribes audio using OpenAI's Whisper API and evaluates responses using GPT-4.
 
 ## Usage
 
@@ -152,12 +158,26 @@ Play audio or synthesize speech. Use either `file` or `text`, not both.  Only th
   text: "Hello, how can I help you?"
 ```
 
-#### `listen (WIP)`
-Record audio, transcribe it, and evaluate against criteria.
+#### `listen`
+Record audio output from the agent, transcribe it, and evaluate against criteria using AI.
+
+**Requirements:**
+- OpenAI API key must be set in `OPENAI_API_KEY` environment variable
+- Uses Whisper API for transcription
+- Uses GPT-4 for evaluation
+
 ```yaml
 - action: listen
   evaluation: "The response should contain appointment scheduling information"
 ```
+
+**How it works:**
+1. Starts recording audio output
+2. Waits for agent to start speaking (audiostart event)
+3. Waits for agent to stop speaking (audiostop event after 1s silence)
+4. Saves recording as WAV file in `output/` directory
+5. Transcribes audio using OpenAI Whisper
+6. Evaluates transcription against the criteria using GPT-4
 
 #### `wait`
 Wait for a web element to appear.
