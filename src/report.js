@@ -36,7 +36,7 @@ export class ReportGenerator {
     }
   }
 
-  endRun() {
+  endRun(success = true) {
     if (this.currentRun.size > 0 || this.currentRunMetadata) {
       // Calculate duration
       const duration = this.currentRunMetadata
@@ -53,6 +53,7 @@ export class ReportGenerator {
         metadata: {
           app: this.currentRunMetadata?.app || '',
           scenario: this.currentRunMetadata?.scenario || '',
+          success: success ? 1 : 0,
           duration: duration
         },
         stepMetrics: runCopy
@@ -85,8 +86,8 @@ export class ReportGenerator {
     // Sort step indices
     const sortedStepIndices = Array.from(allStepMetrics.keys()).sort((a, b) => a - b);
 
-    // Build column headers - start with app, scenario, and duration
-    const headers = ['app', 'scenario', 'duration'];
+    // Build column headers - start with app, scenario, success, and duration
+    const headers = ['app', 'scenario', 'success', 'duration'];
     sortedStepIndices.forEach(stepIndex => {
       const metricNames = Array.from(allStepMetrics.get(stepIndex)).sort();
       metricNames.forEach(metricName => {
@@ -102,6 +103,7 @@ export class ReportGenerator {
       const row = [
         run.metadata.app,
         run.metadata.scenario,
+        run.metadata.success,
         run.metadata.duration
       ];
 

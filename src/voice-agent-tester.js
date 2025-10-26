@@ -632,6 +632,7 @@ export class VoiceAgentTester {
   }
 
   async runScenario(url, steps, appName = '', scenarioName = '', backgroundFile = null) {
+    let success = true;
     try {
       // Start tracking this run with app and scenario names
       if (this.reportGenerator) {
@@ -660,12 +661,13 @@ export class VoiceAgentTester {
 
     } catch (error) {
       // Log the error but still finish the run for report generation
+      success = false;
       console.error('Error during scenario execution:', error.message);
       throw error;
     } finally {
       // Always finish the run for report generation, even if there was an error
       if (this.reportGenerator) {
-        this.reportGenerator.endRun();
+        this.reportGenerator.endRun(success);
       }
 
       await this.close();
