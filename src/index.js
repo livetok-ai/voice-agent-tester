@@ -125,6 +125,12 @@ const argv = yargs(hideBin(process.argv))
     description: 'Comma-separated list of scenario tags to filter by',
     default: null
   })
+  .option('concurrency', {
+    alias: 'c',
+    type: 'number',
+    description: 'Number of tests to run in parallel',
+    default: 1
+  })
   .help()
   .argv;
 
@@ -192,20 +198,15 @@ async function main() {
     // Create a single report generator for metrics tracking
     const reportGenerator = new ReportGenerator(argv.report || 'temp_metrics.csv');
 
-    // Track results for final summary
-    const results = {
-      successful: 0,
-      failed: 0,
-      errors: []
-    };
-
-    let runNumber = 0;
-
-    // Execute all combinations
-    for (const { app, scenario } of combinations) {
+    // Helper function to execute a single test run
+    async function executeRun({ app, scenario, repetition, runNumber }) {
       console.log(`\n${'='.repeat(80)}`);
       console.log(`📱 Application: ${app.name}`);
       console.log(`📝 Scenario: ${scenario.name}`);
+      if (argv.repeat > 1) {
+        console.log(`🔁 Repetition: ${repetition}`);
+      }
+      console.log(`🏃 Run: ${runNumber}/${totalRuns}`);
       console.log(`${'='.repeat(80)}`);
 
       // Handle HTML content vs URL
@@ -228,50 +229,96 @@ async function main() {
         console.log(`URL: ${targetUrl}`);
       }
 
-      // Combine application steps with scenario steps
-      const combinedSteps = [...app.steps, ...scenario.steps];
-      console.log(`Total steps: ${combinedSteps.length} (${app.steps.length} from app + ${scenario.steps.length} from suite)\n`);
+      // Application and scenario steps are executed separately
+      console.log(`Total steps: ${app.steps.length + scenario.steps.length} (${app.steps.length} from app + ${scenario.steps.length} from suite)\n`);
 
-      // Run repetitions for this combination
-      const repetitions = argv.repeat || 1;
+      const tester = new VoiceAgentTester({
+        verbose: argv.verbose,
+        headless: argv.headless,
+        assetsServerUrl: argv.assetsServer,
+        reportGenerator: reportGenerator
+      });
 
-      for (let i = 1; i <= repetitions; i++) {
-        runNumber++;
-
-        if (repetitions > 1) {
-          console.log(`\n--- Repetition ${i} of ${repetitions} (Run ${runNumber}/${totalRuns}) ---`);
-        } else {
-          console.log(`\n--- Run ${runNumber}/${totalRuns} ---`);
-        }
-
-        const tester = new VoiceAgentTester({
-          verbose: argv.verbose,
-          headless: argv.headless,
-          assetsServerUrl: argv.assetsServer,
-          reportGenerator: reportGenerator
-        });
-
-        try {
-          await tester.runScenario(targetUrl, combinedSteps, app.name, scenario.name, scenario.background);
-          results.successful++;
-
-          if (repetitions > 1) {
-            console.log(`✅ Completed repetition ${i} of ${repetitions}`);
-          } else {
-            console.log(`✅ Completed successfully`);
-          }
-        } catch (error) {
-          results.failed++;
-          results.errors.push({
-            app: app.name,
-            scenario: scenario.name,
-            repetition: i,
-            error: error.message
-          });
-          console.error(`❌ Error:`, error.message);
-        }
+      try {
+        await tester.runScenario(targetUrl, app.steps, scenario.steps, app.name, scenario.name, repetition, scenario.background);
+        console.log(`✅ Completed successfully (Run ${runNumber}/${totalRuns})`);
+        return { success: true };
+      } catch (error) {
+        const errorInfo = {
+          app: app.name,
+          scenario: scenario.name,
+          repetition,
+          error: error.message
+        };
+        console.error(`❌ Error (Run ${runNumber}/${totalRuns}):`, error.message);
+        return { success: false, error: errorInfo };
       }
     }
+
+    // Build all test runs (combination x repetitions)
+    const allRuns = [];
+    let runNumber = 0;
+
+    for (const { app, scenario } of combinations) {
+      const repetitions = argv.repeat || 1;
+      for (let i = 0; i < repetitions; i++) {
+        runNumber++;
+        allRuns.push({
+          app,
+          scenario,
+          repetition: i,
+          runNumber
+        });
+      }
+    }
+
+    // Execute runs with concurrency limit using a worker pool
+    const concurrency = Math.min(argv.concurrency || 1, allRuns.length);
+    console.log(`⚡ Concurrency level: ${concurrency}`);
+
+    // Worker pool implementation - start new tests as soon as one finishes
+    const allResults = [];
+    let nextRunIndex = 0;
+
+    // Create a pool of worker promises
+    const workers = [];
+    for (let i = 0; i < concurrency; i++) {
+      workers.push(runWorker(i + 1));
+    }
+
+    // Worker function that processes runs from the queue
+    async function runWorker(workerId) {
+      const workerResults = [];
+
+      while (nextRunIndex < allRuns.length) {
+        const runIndex = nextRunIndex++;
+        const run = allRuns[runIndex];
+
+        if (concurrency > 1) {
+          console.log(`\n👷 Worker ${workerId}: Starting run ${run.runNumber}/${totalRuns}`);
+        }
+
+        const result = await executeRun(run);
+        workerResults.push(result);
+      }
+
+      return workerResults;
+    }
+
+    // Wait for all workers to complete
+    const workerResultArrays = await Promise.all(workers);
+
+    // Flatten all worker results into a single array
+    workerResultArrays.forEach(workerResults => {
+      allResults.push(...workerResults);
+    });
+
+    // Aggregate results
+    const results = {
+      successful: allResults.filter(r => r.success).length,
+      failed: allResults.filter(r => !r.success).length,
+      errors: allResults.filter(r => !r.success).map(r => r.error)
+    };
 
     // Generate the final report if requested, and always show metrics summary
     if (argv.report) {

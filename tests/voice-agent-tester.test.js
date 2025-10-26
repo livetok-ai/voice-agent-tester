@@ -75,10 +75,10 @@ describe('VoiceAgentTester', () => {
     });
     
     // Execute click step
-    await tester.executeStep({ 
-      action: 'click', 
-      element: '#test-btn' 
-    });
+    await tester.executeStep({
+      action: 'click',
+      selector: '#test-btn'
+    }, 0, 'scenario');
     
     // Verify the click worked
     const result = await tester.page.evaluate(() => document.getElementById('result').textContent);
@@ -102,10 +102,10 @@ describe('VoiceAgentTester', () => {
     });
     
     // Execute wait step
-    await tester.executeStep({ 
-      action: 'wait', 
-      element: '#delayed-element' 
-    });
+    await tester.executeStep({
+      action: 'wait',
+      selector: '#delayed-element'
+    }, 0, 'scenario');
     
     // Verify the element exists
     const element = await tester.page.$('#delayed-element');
@@ -136,10 +136,10 @@ describe('VoiceAgentTester', () => {
       return originalTimeout.call(tester.page, ms);
     };
     
-    await tester.executeStep({ 
-      action: 'speak', 
-      text: 'Hello, this is a test' 
-    });
+    await tester.executeStep({
+      action: 'speak',
+      text: 'Hello, this is a test'
+    }, 0, 'scenario');
     
     // Verify speech was triggered
     const speechText = await tester.page.evaluate(() => document.getElementById('speech-test').textContent);
@@ -157,9 +157,9 @@ describe('VoiceAgentTester', () => {
       logMessage = message;
     };
     
-    await tester.executeStep({ 
-      action: 'unknown_action' 
-    });
+    await tester.executeStep({
+      action: 'unknown_action'
+    }, 0, 'scenario');
     
     expect(logMessage).toBe('Unknown action: unknown_action');
     
@@ -171,16 +171,16 @@ describe('VoiceAgentTester', () => {
     await tester.launch();
     await tester.page.goto('data:text/html,<html><body></body></html>');
     
-    // Test click without element
-    await expect(tester.executeStep({ action: 'click' }))
-      .rejects.toThrow('No element specified for click action');
-    
-    // Test wait without element
-    await expect(tester.executeStep({ action: 'wait' }))
-      .rejects.toThrow('No element specified for wait action');
-    
+    // Test click without selector
+    await expect(tester.executeStep({ action: 'click' }, 0, 'scenario'))
+      .rejects.toThrow('No selector specified for click action');
+
+    // Test wait without selector
+    await expect(tester.executeStep({ action: 'wait' }, 0, 'scenario'))
+      .rejects.toThrow('No selector specified for wait action');
+
     // Test speak without text
-    await expect(tester.executeStep({ action: 'speak' }))
-      .rejects.toThrow('No text specified for speak action');
+    await expect(tester.executeStep({ action: 'speak' }, 0, 'scenario'))
+      .rejects.toThrow('No text or file specified for speak action');
   });
 });

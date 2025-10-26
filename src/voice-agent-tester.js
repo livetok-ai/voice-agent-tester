@@ -166,7 +166,7 @@ export class VoiceAgentTester {
     }
   }
 
-  async executeStep(step, stepIndex) {
+  async executeStep(step, stepIndex, appName = '', scenarioName = '', repetition = 1) {
     if (!this.page) {
       throw new Error('Browser not launched. Call launch() first.');
     }
@@ -225,13 +225,13 @@ export class VoiceAgentTester {
       // Record metrics for report if enabled and step has metrics attribute
       if (this.reportGenerator && step.metrics) {
         if (step.metrics.includes('elapsed_time')) {
-        this.reportGenerator.recordStepMetric(stepIndex, step.action, 'elapsed_time', elapsedTimeMs);
+        this.reportGenerator.recordStepMetric(appName, scenarioName, repetition, stepIndex, step.action, 'elapsed_time', elapsedTimeMs);
         }
         // Record any additional metrics returned by the handler
         if (handlerResult && typeof handlerResult === 'object') {
           for (const [metricName, metricValue] of Object.entries(handlerResult)) {
             if (step.metrics.includes(metricName)) {
-            this.reportGenerator.recordStepMetric(stepIndex, step.action, metricName, metricValue);
+            this.reportGenerator.recordStepMetric(appName, scenarioName, repetition, stepIndex, step.action, metricName, metricValue);
             }
           }
         }
@@ -631,17 +631,20 @@ export class VoiceAgentTester {
     }
   }
 
-  async runScenario(url, steps, appName = '', scenarioName = '', backgroundFile = null) {
+  async runScenario(url, appSteps, scenarioSteps, appName = '', scenarioName = '', repetition = 1, backgroundFile = null) {
     let success = true;
     try {
       // Start tracking this run with app and scenario names
       if (this.reportGenerator) {
-        this.reportGenerator.beginRun(appName, scenarioName);
+        this.reportGenerator.beginRun(appName, scenarioName, repetition);
       }
+
+      // Combine app steps and scenario steps
+      const steps = [...appSteps, ...scenarioSteps];
 
       await this.launch();
 
-      await this.page.goto(url);
+      await this.page.goto(url, { waitUntil: 'networkidle2' });
 
       // Inject JavaScript files after the page has loaded
       await this.injectJavaScriptFiles();
@@ -653,7 +656,7 @@ export class VoiceAgentTester {
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
         console.log(`Executing step ${i + 1}: ${JSON.stringify(step)}`);
-        await this.executeStep(step, i);
+        await this.executeStep(step, i, appName, scenarioName, repetition);
       }
 
       // Keep the browser open for a bit after all steps
@@ -667,7 +670,7 @@ export class VoiceAgentTester {
     } finally {
       // Always finish the run for report generation, even if there was an error
       if (this.reportGenerator) {
-        this.reportGenerator.endRun(success);
+        this.reportGenerator.endRun(appName, scenarioName, repetition, success);
       }
 
       await this.close();

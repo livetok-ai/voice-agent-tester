@@ -51,8 +51,11 @@ describe('Integration Tests', () => {
     // Use data URL to avoid file system dependencies
     const testUrl = `data:text/html,${encodeURIComponent(testPageContent)}`;
 
-    const steps = [
-      { action: 'click', element: '#start' },
+    const appSteps = [
+      { action: 'click', selector: '#start' }
+    ];
+
+    const scenarioSteps = [
       { action: 'speak', text: 'Hello, this is a test.' }
     ];
 
@@ -65,7 +68,7 @@ describe('Integration Tests', () => {
       return originalTimeout.call(tester.page, Math.min(ms, 100)); // Cap other waits at 100ms
     };
 
-    await tester.runScenario(testUrl, steps);
+    await tester.runScenario(testUrl, appSteps, scenarioSteps);
 
     // The scenario should complete without throwing errors
     expect(true).toBe(true);
@@ -93,13 +96,16 @@ describe('Integration Tests', () => {
 
     const testUrl = `data:text/html,${encodeURIComponent(testPageContent)}`;
 
-    const steps = [
-      { action: 'click', element: '#trigger' },
-      { action: 'wait', element: '#dynamic-element' }
+    const appSteps = [
+      { action: 'click', selector: '#trigger' }
+    ];
+
+    const scenarioSteps = [
+      { action: 'wait', selector: '#dynamic-element' }
     ];
 
     await tester.launch();
-    
+
     // Override timeouts for faster testing
     const originalTimeout = tester.page.waitForTimeout;
     tester.page.waitForTimeout = async (ms) => {
@@ -107,7 +113,7 @@ describe('Integration Tests', () => {
       return originalTimeout.call(tester.page, Math.min(ms, 100));
     };
 
-    await tester.runScenario(testUrl, steps);
+    await tester.runScenario(testUrl, appSteps, scenarioSteps);
 
     // Verify the dynamic element exists
     const element = await tester.page.$('#dynamic-element');

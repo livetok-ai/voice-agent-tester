@@ -5,27 +5,45 @@ export class ReportGenerator {
   constructor(filePath) {
     this.filePath = path.resolve(filePath);
     this.allRunsData = [];
-    this.currentRun = new Map(); // Map of stepIndex -> Map of metricName -> value
+    // Map: "app|scenario|repetition" -> { metadata, stepMetrics, startTime }
+    this.runs = new Map();
     this.stepColumns = new Map(); // Map of stepIndex -> Map of metricName -> column name
-    this.currentRunMetadata = null; // Store app, scenario, and duration info
   }
 
-  beginRun(appName, scenarioName) {
-    this.currentRunMetadata = {
-      app: appName,
-      scenario: scenarioName,
-      startTime: Date.now()
-    };
+  // Create a unique key for each run
+  _getRunKey(appName, scenarioName, repetition) {
+    return `${appName}|${scenarioName}|${repetition}`;
   }
 
-  recordStepMetric(stepIndex, action, name, value) {
+  beginRun(appName, scenarioName, repetition) {
+    const key = this._getRunKey(appName, scenarioName, repetition);
+    this.runs.set(key, {
+      metadata: {
+        app: appName,
+        scenario: scenarioName,
+        repetition: repetition,
+        startTime: Date.now()
+      },
+      stepMetrics: new Map() // Map of stepIndex -> Map of metricName -> value
+    });
+  }
+
+  recordStepMetric(appName, scenarioName, repetition, stepIndex, action, name, value) {
+    const key = this._getRunKey(appName, scenarioName, repetition);
+    const run = this.runs.get(key);
+
+    if (!run) {
+      console.warn(`Warning: Attempting to record metric for non-existent run: ${key}`);
+      return;
+    }
+
     // Initialize step metrics map if it doesn't exist
-    if (!this.currentRun.has(stepIndex)) {
-      this.currentRun.set(stepIndex, new Map());
+    if (!run.stepMetrics.has(stepIndex)) {
+      run.stepMetrics.set(stepIndex, new Map());
     }
 
     // Record the metric value
-    this.currentRun.get(stepIndex).set(name, value);
+    run.stepMetrics.get(stepIndex).set(name, value);
 
     // Track column names based on step index, action, and metric name
     if (!this.stepColumns.has(stepIndex)) {
@@ -36,32 +54,37 @@ export class ReportGenerator {
     }
   }
 
-  endRun(success = true) {
-    if (this.currentRun.size > 0 || this.currentRunMetadata) {
-      // Calculate duration
-      const duration = this.currentRunMetadata
-        ? Date.now() - this.currentRunMetadata.startTime
-        : 0;
+  endRun(appName, scenarioName, repetition, success = true) {
+    const key = this._getRunKey(appName, scenarioName, repetition);
+    const run = this.runs.get(key);
 
-      // Deep copy the nested Map structure
-      const runCopy = new Map();
-      this.currentRun.forEach((metricsMap, stepIndex) => {
-        runCopy.set(stepIndex, new Map(metricsMap));
-      });
-
-      this.allRunsData.push({
-        metadata: {
-          app: this.currentRunMetadata?.app || '',
-          scenario: this.currentRunMetadata?.scenario || '',
-          success: success ? 1 : 0,
-          duration: duration
-        },
-        stepMetrics: runCopy
-      });
-
-      this.currentRun = new Map();
-      this.currentRunMetadata = null;
+    if (!run) {
+      console.warn(`Warning: Attempting to end non-existent run: ${key}`);
+      return;
     }
+
+    // Calculate duration
+    const duration = Date.now() - run.metadata.startTime;
+
+    // Deep copy the nested Map structure
+    const runCopy = new Map();
+    run.stepMetrics.forEach((metricsMap, stepIndex) => {
+      runCopy.set(stepIndex, new Map(metricsMap));
+    });
+
+    this.allRunsData.push({
+      metadata: {
+        app: run.metadata.app,
+        scenario: run.metadata.scenario,
+        repetition: run.metadata.repetition,
+        success: success ? 1 : 0,
+        duration: duration
+      },
+      stepMetrics: runCopy
+    });
+
+    // Remove the run from active runs map
+    this.runs.delete(key);
   }
 
   generateCSV() {
@@ -86,8 +109,8 @@ export class ReportGenerator {
     // Sort step indices
     const sortedStepIndices = Array.from(allStepMetrics.keys()).sort((a, b) => a - b);
 
-    // Build column headers - start with app, scenario, success, and duration
-    const headers = ['app', 'scenario', 'success', 'duration'];
+    // Build column headers - start with app, scenario, repetition, success, and duration
+    const headers = ['app', 'scenario', 'repetition', 'success', 'duration'];
     sortedStepIndices.forEach(stepIndex => {
       const metricNames = Array.from(allStepMetrics.get(stepIndex)).sort();
       metricNames.forEach(metricName => {
@@ -103,6 +126,7 @@ export class ReportGenerator {
       const row = [
         run.metadata.app,
         run.metadata.scenario,
+        run.metadata.repetition,
         run.metadata.success,
         run.metadata.duration
       ];
