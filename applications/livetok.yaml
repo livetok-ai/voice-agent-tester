@@ -1,4 +1,7 @@
 url: "https://rti.livetok.io/demo/index.html"
+tags:
+  - default
+  - basic
 steps:
   - action: fill
     selector: "input[type='password']"
@@ -11,16 +14,3 @@ steps:
   #   text: "[]"
   - action: click
     selector: "#start"
-  - action: wait_for_voice
-  - action: wait_for_silence
-  - action: speak
-    file: hello_make_an_appointment.mp3
-  # - action: listen
-  #   evaluate: "It is greeting the user"
-  - action: wait_for_voice
-    metrics: elapsed_time
-  - action: wait_for_silence
-  - action: speak
-    file: appointment_data.mp3
-  - action: wait_for_voice
-    metrics: elapsed_time
