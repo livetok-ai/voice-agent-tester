@@ -110,10 +110,12 @@ export class VoiceAgentTester {
     const browserVersion = await this.browser.version();
     console.log(`Browser launched: ${browserVersion}`);
 
-    // Override permissions for media stream
-    const context = this.browser.defaultBrowserContext();
-    await context.clearPermissionOverrides();
-    await context.overridePermissions(url, ['camera', 'microphone']);
+    // Override permissions for media stream (only for http/https URLs, not data: or file: URLs)
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+      const context = this.browser.defaultBrowserContext();
+      await context.clearPermissionOverrides();
+      await context.overridePermissions(url, ['camera', 'microphone']);
+    }
     
     this.page = await this.browser.newPage();
 

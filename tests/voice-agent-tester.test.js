@@ -37,35 +37,39 @@ describe('VoiceAgentTester', () => {
   });
 
   test('should launch browser successfully', async () => {
-    await tester.launch();
+    const testUrl = 'data:text/html,<html><body></body></html>';
+    await tester.launch(testUrl);
     expect(tester.browser).not.toBe(null);
     expect(tester.page).not.toBe(null);
   });
 
   test('should close browser successfully', async () => {
-    await tester.launch();
+    const testUrl = 'data:text/html,<html><body></body></html>';
+    await tester.launch(testUrl);
     expect(tester.browser).not.toBe(null);
-    
+
     await tester.close();
     expect(tester.browser).toBe(null);
     expect(tester.page).toBe(null);
   });
 
   test('should handle basic navigation', async () => {
-    await tester.launch();
-    
+    const testUrl = 'data:text/html,<html><body><h1>Test Page</h1></body></html>';
+    await tester.launch(testUrl);
+
     // Navigate to a basic page
-    await tester.page.goto('data:text/html,<html><body><h1>Test Page</h1></body></html>');
-    
+    await tester.page.goto(testUrl);
+
     const title = await tester.page.evaluate(() => document.querySelector('h1').textContent);
     expect(title).toBe('Test Page');
   });
 
   test('should execute click step', async () => {
-    await tester.launch();
-    
-    // Create a simple page with a clickable button
-    await tester.page.goto('data:text/html,<html><body><button id="test-btn">Click Me</button><div id="result"></div></body></html>');
+    const testUrl = 'data:text/html,<html><body><button id="test-btn">Click Me</button><div id="result"></div></body></html>';
+    await tester.launch(testUrl);
+
+    // Navigate to the test page
+    await tester.page.goto(testUrl);
     
     // Add click handler
     await tester.page.evaluate(() => {
@@ -86,10 +90,11 @@ describe('VoiceAgentTester', () => {
   });
 
   test('should execute wait step', async () => {
-    await tester.launch();
-    
-    // Create a page with an element that appears after a delay
-    await tester.page.goto('data:text/html,<html><body><div id="container"></div></body></html>');
+    const testUrl = 'data:text/html,<html><body><div id="container"></div></body></html>';
+    await tester.launch(testUrl);
+
+    // Navigate to the test page
+    await tester.page.goto(testUrl);
     
     // Add the element after a short delay
     await tester.page.evaluate(() => {
@@ -113,63 +118,62 @@ describe('VoiceAgentTester', () => {
   });
 
   test('should handle speak step', async () => {
-    await tester.launch();
-    
-    await tester.page.goto('data:text/html,<html><body><div id="speech-test"></div></body></html>');
-    
-    // Mock speechSynthesis to capture the speak call
+    const testUrl = 'data:text/html,<html><body><div id="speech-test"></div></body></html>';
+    await tester.launch(testUrl);
+
+    await tester.page.goto(testUrl);
+
+    // Mock __speak to capture the speak call and publish speechend event after a small delay
     await tester.page.evaluate(() => {
-      window.speechSynthesis = {
-        speak: (utterance) => {
-          document.getElementById('speech-test').textContent = utterance.text;
-        }
-      };
-      window.SpeechSynthesisUtterance = function(text) {
-        this.text = text;
+      window.__speak = (text) => {
+        document.getElementById('speech-test').textContent = text;
+        // Signal speech end after a small delay to allow waitForAudioEvent to be set up
+        setTimeout(() => {
+          if (window.__publishEvent) {
+            window.__publishEvent('speechend', {});
+          }
+        }, 10);
       };
     });
-    
-    // Execute speak step with shorter timeout for testing
-    const originalTimeout = tester.page.waitForTimeout;
-    tester.page.waitForTimeout = async (ms) => {
-      if (ms === 10000) return Promise.resolve(); // Skip the 10s wait
-      return originalTimeout.call(tester.page, ms);
-    };
-    
+
     await tester.executeStep({
       action: 'speak',
       text: 'Hello, this is a test'
     }, 0, 'scenario');
-    
+
     // Verify speech was triggered
     const speechText = await tester.page.evaluate(() => document.getElementById('speech-test').textContent);
     expect(speechText).toBe('Hello, this is a test');
   });
 
   test('should handle unknown action gracefully', async () => {
-    await tester.launch();
-    await tester.page.goto('data:text/html,<html><body></body></html>');
+    const testUrl = 'data:text/html,<html><body></body></html>';
+    await tester.launch(testUrl);
+    await tester.page.goto(testUrl);
     
     // Mock console.log to capture the output
     const originalLog = console.log;
-    let logMessage = '';
+    let logMessages = [];
     console.log = (message) => {
-      logMessage = message;
+      logMessages.push(message);
     };
-    
+
     await tester.executeStep({
       action: 'unknown_action'
     }, 0, 'scenario');
-    
-    expect(logMessage).toBe('Unknown action: unknown_action');
-    
+
+    // Find the unknown action message
+    const unknownActionMessage = logMessages.find(msg => msg.includes('Unknown action'));
+    expect(unknownActionMessage).toBe('Unknown action: unknown_action');
+
     // Restore console.log
     console.log = originalLog;
   });
 
   test('should throw error for missing required parameters', async () => {
-    await tester.launch();
-    await tester.page.goto('data:text/html,<html><body></body></html>');
+    const testUrl = 'data:text/html,<html><body></body></html>';
+    await tester.launch(testUrl);
+    await tester.page.goto(testUrl);
     
     // Test click without selector
     await expect(tester.executeStep({ action: 'click' }, 0, 'scenario'))
