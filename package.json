@@ -14,10 +14,12 @@
     "voice-agent-tester": "./src/index.js"
   },
   "dependencies": {
+    "@puppeteer/browsers": "^2.4.0",
     "express": "^5.1.0",
     "glob": "^11.0.0",
     "openai": "^4.104.0",
-    "puppeteer": "^24.0.0",
+    "puppeteer": "^24.3.0",
+    "puppeteer-stream": "^3.0.8",
     "yaml": "^2.3.0",
     "yargs": "^17.7.0"
   },

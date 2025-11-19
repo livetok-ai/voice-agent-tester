@@ -5,7 +5,7 @@ tags:
 steps:
   - action: fill
     selector: "input[type='password']"
-    text: "AIzaSyDoB9fBVI_mwLMy8I_q5hR_zuXfA8FykuU"
+    text: ""
   # - action: select
   #   selector: "#model"
   #   value: "gemini-2.5-flash-preview-native-audio-dialog"

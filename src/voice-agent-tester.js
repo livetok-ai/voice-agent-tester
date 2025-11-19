@@ -3,6 +3,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { glob } from 'glob';
 import puppeteer from 'puppeteer';
+import { launch as launchWithStream, getStream, wss } from 'puppeteer-stream';
+import { getInstalledBrowsers } from '@puppeteer/browsers';
 import { transcribeAudio, evaluateTranscription, pcmToWav } from './transcription.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,6 +20,9 @@ export class VoiceAgentTester {
     const defaultPort = process.env.HTTP_PORT || process.env.PORT || 3333;
     this.assetsServerUrl = options.assetsServerUrl || `http://localhost:${defaultPort}`;
     this.reportGenerator = options.reportGenerator || null;
+    this.record = options.record || false;
+    this.recordingStream = null;
+    this.recordingFile = null;
   }
 
   sleep(time) {
@@ -59,25 +64,57 @@ export class VoiceAgentTester {
     this.pendingPromises.clear();
   }
 
-  async launch() {
+  async launch(url) {
     if (this.browser) {
       return;
     }
 
-    this.browser = await puppeteer.launch({
+    // Log installed browsers
+    const homeDir = process.env.HOME || process.env.USERPROFILE;
+    const cacheDir = path.join(homeDir, '.cache', 'puppeteer');
+    const browsers = await getInstalledBrowsers({ cacheDir });
+    console.log(`Installed browsers: ${browsers.map(b => b.browser + ' ' + b.buildId).join(', ')}`);
+
+    const launchOptions = {
       headless: this.headless,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--use-fake-ui-for-media-stream',
+        // This is not compatible with puppeteer-stream
+        // Use context.overridePermissions instead
+        // '--use-fake-ui-for-media-stream', 
         '--autoplay-policy=no-user-gesture-required',
         '--disable-web-security',
         '--allow-running-insecure-content',
         '--no-first-run',
-        '--no-default-browser-check'
+        '--no-default-browser-check',
+        '--allowlisted-extension-id=jjndjgheafjngoipoacpjgeicjeomjli' // puppeteer-stream extension id
       ]
-    });
+    };
 
+    // Use puppeteer-stream launch when recording is enabled
+    if (this.record) {
+      this.browser = await launchWithStream({
+        ...launchOptions,
+        headless: launchOptions.headless ? 'new' : launchOptions.headless,
+        executablePath: browsers
+          .filter(b => b.browser === 'chrome')
+          .sort((a, b) => (a.buildId < b.buildId ? 1 : a.buildId > b.buildId ? -1 : 0))
+          .at(0).executablePath
+      });
+    } else {
+      this.browser = await puppeteer.launch(launchOptions);
+    }
+
+    // Log browser info
+    const browserVersion = await this.browser.version();
+    console.log(`Browser launched: ${browserVersion}`);
+
+    // Override permissions for media stream
+    const context = this.browser.defaultBrowserContext();
+    await context.clearPermissionOverrides();
+    await context.overridePermissions(url, ['camera', 'microphone']);
+    
     this.page = await this.browser.newPage();
 
     // Register __publishEvent function for browser to call back to Node.js
@@ -120,6 +157,11 @@ export class VoiceAgentTester {
 
   async close() {
     if (this.browser) {
+      // Stop recording if active
+      if (this.recordingStream) {
+        await this.stopRecording();
+      }
+
       // Clear any pending promises before closing
       for (const [eventType, promises] of this.pendingPromises.entries()) {
         for (const { reject, timeoutId } of promises) {
@@ -132,7 +174,76 @@ export class VoiceAgentTester {
       await this.browser.close();
       this.browser = null;
       this.page = null;
+
+      // Close the websocket server if recording was used
+      if (this.record) {
+        try {
+          (await wss).close();
+        } catch (error) {
+          // Ignore errors when closing wss
+        }
+      }
     }
+  }
+
+  async startRecording(appName, scenarioName, repetition) {
+    if (!this.record || !this.page) {
+      return;
+    }
+
+    // Ensure output directory exists
+    const outputDir = path.join(__dirname, '..', 'output');
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    // Create filename with timestamp and test info
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const sanitizedAppName = appName.replace(/[^a-zA-Z0-9]/g, '_');
+    const sanitizedScenarioName = scenarioName.replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `recording_${sanitizedAppName}_${sanitizedScenarioName}_${repetition}_${timestamp}.webm`;
+    const filePath = path.join(outputDir, filename);
+
+    // Create write stream for the recording
+    this.recordingFile = fs.createWriteStream(filePath);
+
+    console.log('Starting stream');
+    // Start the stream with audio and video
+    this.recordingStream = await getStream(this.page, {
+      audio: true,
+      video: true,
+      mimeType: 'video/webm;codecs=vp8,opus'
+    });
+
+    console.log('Stream started');
+
+    // Pipe the stream to the file
+    this.recordingStream.pipe(this.recordingFile);
+
+    console.log(`🎥 Recording started: ${filename}`);
+    this.recordingFilePath = filePath;
+  }
+
+  async stopRecording() {
+    if (!this.recordingStream) {
+      return;
+    }
+
+    return new Promise((resolve) => {
+      // Destroy the stream to stop recording
+      this.recordingStream.destroy();
+
+      // Close the file stream
+      this.recordingFile.on('close', () => {
+        console.log(`🎥 Recording saved: ${this.recordingFilePath}`);
+        this.recordingStream = null;
+        this.recordingFile = null;
+        this.recordingFilePath = null;
+        resolve();
+      });
+
+      this.recordingFile.close();
+    });
   }
 
   async injectJavaScriptFiles() {
@@ -642,7 +753,7 @@ export class VoiceAgentTester {
       // Combine app steps and scenario steps
       const steps = [...appSteps, ...scenarioSteps];
 
-      await this.launch();
+      await this.launch(url);
 
       await this.page.goto(url, { waitUntil: 'networkidle2' });
 
@@ -652,6 +763,9 @@ export class VoiceAgentTester {
       // Small wait to ensure injected scripts are fully loaded
       await this.sleep(500);
 
+      // Start recording if enabled
+      await this.startRecording(appName, scenarioName, repetition);
+
       // Execute all configured steps
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
@@ -660,12 +774,12 @@ export class VoiceAgentTester {
       }
 
       // Keep the browser open for a bit after all steps
-      await this.sleep(5000);
+      await this.sleep(500);
 
     } catch (error) {
       // Log the error but still finish the run for report generation
       success = false;
-      console.error('Error during scenario execution:', error.message);
+      console.error('Error during scenario execution:', error);
       throw error;
     } finally {
       // Always finish the run for report generation, even if there was an error

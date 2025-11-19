@@ -131,6 +131,11 @@ const argv = yargs(hideBin(process.argv))
     description: 'Number of tests to run in parallel',
     default: 1
   })
+  .option('record', {
+    type: 'boolean',
+    description: 'Record video and audio of the test in webm format',
+    default: false
+  })
   .help()
   .argv;
 
@@ -236,7 +241,8 @@ async function main() {
         verbose: argv.verbose,
         headless: argv.headless,
         assetsServerUrl: argv.assetsServer,
-        reportGenerator: reportGenerator
+        reportGenerator: reportGenerator,
+        record: argv.record
       });
 
       try {
