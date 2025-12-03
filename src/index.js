@@ -141,6 +141,7 @@ const argv = yargs(hideBin(process.argv))
 
 async function main() {
   let server;
+  let exitCode = 0;
   const tempHtmlPaths = [];
 
   try {
@@ -351,13 +352,13 @@ async function main() {
       console.log(`\n⚠️  Completed with ${results.failed} failure(s).`);
     }
 
-    // Exit with appropriate code based on results
+    // Set exit code based on results
     if (results.failed > 0) {
-      process.exit(1);
+      exitCode = 1;
     }
   } catch (error) {
     console.error('Error running scenarios:', error.message);
-    process.exit(1);
+    exitCode = 1;
   } finally {
     // Clean up temporary HTML files if created
     for (const tempHtmlPath of tempHtmlPaths) {
@@ -373,7 +374,10 @@ async function main() {
     if (server) {
       server.close(() => {
         console.log('Server closed');
+        process.exit(exitCode);
       });
+    } else {
+      process.exit(exitCode);
     }
   }
 }
