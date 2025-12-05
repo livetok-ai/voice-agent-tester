@@ -116,7 +116,7 @@ export class VoiceAgentTester {
       await context.clearPermissionOverrides();
       await context.overridePermissions(url, ['camera', 'microphone']);
     }
-    
+
     this.page = await this.browser.newPage();
 
     // Register __publishEvent function for browser to call back to Node.js
@@ -338,13 +338,13 @@ export class VoiceAgentTester {
       // Record metrics for report if enabled and step has metrics attribute
       if (this.reportGenerator && step.metrics) {
         if (step.metrics.includes('elapsed_time')) {
-        this.reportGenerator.recordStepMetric(appName, scenarioName, repetition, stepIndex, step.action, 'elapsed_time', elapsedTimeMs);
+          this.reportGenerator.recordStepMetric(appName, scenarioName, repetition, stepIndex, step.action, 'elapsed_time', elapsedTimeMs);
         }
         // Record any additional metrics returned by the handler
         if (handlerResult && typeof handlerResult === 'object') {
           for (const [metricName, metricValue] of Object.entries(handlerResult)) {
             if (step.metrics.includes(metricName)) {
-            this.reportGenerator.recordStepMetric(appName, scenarioName, repetition, stepIndex, step.action, metricName, metricValue);
+              this.reportGenerator.recordStepMetric(appName, scenarioName, repetition, stepIndex, step.action, metricName, metricValue);
             }
           }
         }
@@ -415,7 +415,16 @@ export class VoiceAgentTester {
 
       const fileUrl = `${this.assetsServerUrl}/assets/${file}`;
 
-      await this.page.evaluate((url) => {
+      await this.page.evaluate(async (url) => {
+        if (typeof window.__waitForMediaStream === 'function') {
+          try {
+            await window.__waitForMediaStream();
+          } catch (e) {
+            console.error(e.message);
+            throw e;
+          }
+        }
+
         console.log('Checking for __speakFromUrl function...');
         console.log('typeof window.__speakFromUrl:', typeof window.__speakFromUrl);
         console.log('typeof window.__speak:', typeof window.__speak);
@@ -433,7 +442,16 @@ export class VoiceAgentTester {
         }
       }, fileUrl);
     } else {
-      await this.page.evaluate((textToSpeak) => {
+      await this.page.evaluate(async (textToSpeak) => {
+        if (typeof window.__waitForMediaStream === 'function') {
+          try {
+            await window.__waitForMediaStream();
+          } catch (e) {
+            console.error(e.message);
+            throw e;
+          }
+        }
+
         if (typeof window.__speak === 'function') {
           window.__speak(textToSpeak);
         } else {
@@ -757,10 +775,12 @@ export class VoiceAgentTester {
 
       await this.launch(url);
 
-      await this.page.goto(url, { waitUntil: 'networkidle2' });
+      await this.page.goto(url, { waitUntil: 'load' });
 
       // Inject JavaScript files after the page has loaded
       await this.injectJavaScriptFiles();
+
+      await this.page.waitForNetworkIdle({ timeout: 5000, concurrency: 2 });
 
       // Small wait to ensure injected scripts are fully loaded
       await this.sleep(500);

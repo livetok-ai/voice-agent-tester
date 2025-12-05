@@ -9,6 +9,15 @@ const MAKE_SPEAK_AUDIO_AUDIBLE = true;
 let globalAudioContext = null;
 let mediaStreams = []; // Array to store multiple MediaStream instances
 let currentPlaybackNodes = []; // Array to store current playback nodes for all streams
+let mediaStreamWaiters = []; // Array of resolve functions waiting for a stream
+
+function checkMediaStreamWaiters() {
+  if (mediaStreams.length > 0) {
+    const waiters = [...mediaStreamWaiters];
+    mediaStreamWaiters = [];
+    waiters.forEach(waiter => waiter());
+  }
+}
 
 // Create AudioContext and setup silence generation (multiple streams)
 function createControlledMediaStream() {
@@ -48,6 +57,7 @@ function createControlledMediaStream() {
 
   mediaStreams.push(streamData);
   console.log(`🎤 Created new controlled MediaStream: ${streamData.id} (Total: ${mediaStreams.length})`);
+  checkMediaStreamWaiters();
   return mediaStream;
 }
 
@@ -216,7 +226,7 @@ function stopCurrentAudio() {
 }
 
 // Helper function to get information about all MediaStreams
-window.__getMediaStreamInfo = function() {
+window.__getMediaStreamInfo = function () {
   return {
     totalStreams: mediaStreams.length,
     streams: mediaStreams.map(streamData => ({
@@ -229,7 +239,7 @@ window.__getMediaStreamInfo = function() {
 };
 
 // Helper function to remove a specific MediaStream
-window.__removeMediaStream = function(streamId) {
+window.__removeMediaStream = function (streamId) {
   const index = mediaStreams.findIndex(streamData => streamData.id === streamId || streamData.stream.id === streamId);
   if (index !== -1) {
     const streamData = mediaStreams[index];
@@ -250,4 +260,32 @@ window.__removeMediaStream = function(streamId) {
 
 // Expose helper function for external control
 window.__stopAudio = stopCurrentAudio;
+
+window.__waitForMediaStream = function (timeout = 10000) {
+  if (mediaStreams.length > 0) {
+    return Promise.resolve();
+  }
+
+  console.log(`🎤 Waiting for MediaStream (timeout: ${timeout}ms)...`);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const index = mediaStreamWaiters.indexOf(onStreamReady);
+      if (index > -1) mediaStreamWaiters.splice(index, 1);
+      reject(new Error("Timeout waiting for MediaStream initialization. The application has not requested microphone access yet."));
+    }, timeout);
+
+    const onStreamReady = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      resolve();
+    };
+
+    mediaStreamWaiters.push(onStreamReady);
+  });
+};
 
