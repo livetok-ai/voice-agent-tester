@@ -5,11 +5,14 @@ A command-line tool for automated testing of voice agents using Puppeteer. This 
 ## Features
 
 - **Browser Automation**: Headless or visual browser control using Puppeteer
-- **Voice Interaction**: Speak audio files or text-to-speech
-- **Audio Recording & Transcription**: Record audio responses and transcribe using OpenAI Whisper
-- **Performance Metrics**: Measure elapsed times for steps and generate CSV reports
+- **Voice Interaction**: Speak audio files or use text-to-speech
+- **Recordings**: Record sessions for subjective evaluation
+- **Transcriptions**: Generate and process transcriptions
+- **Performance Metrics**: Measure elapsed times for steps
+- **LLM Evaluation**: LLM as a judge support to validate responses
 - **Multiple Test Runs**: Repeat scenarios multiple times for consistent testing
 - **Configurable Scenarios**: YAML-based test scenario definitions
+- **Reporting**: Generate CSV reports with metrics and results
 
 ## Installation
 
@@ -66,6 +69,8 @@ npm start -- -a apps/livetok.yaml -s suites/appointment.yaml --repeat 5
 | `--assets-server` | | string | No | Assets server URL (default: http://localhost:3333) |
 
 ## Configuration
+
+The configuration is split in two parts, application configuration and scenario configuration but they have the same format and the same type of steps.   The separation is only to be able to run the same scenarios with multiple applications and multiple scenarios with a single application while avoiding duplication of shared steps.
 
 ### Application Configuration
 
