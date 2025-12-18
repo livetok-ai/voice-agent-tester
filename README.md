@@ -14,6 +14,13 @@ A command-line tool for automated testing of voice agents using Puppeteer. This 
 - **Configurable Scenarios**: YAML-based test scenario definitions
 - **Reporting**: Generate CSV reports with metrics and results
 
+### Upcoming features
+
+- **Noise Generation**: Testing on noisy conditions or with background voices (WIP)
+- **HTTP API for Remote Control**: Expose an API to launch tests from other services
+- **Implement VAQI score**
+- **Improve Documentation**
+
 ## Installation
 
 1. Install dependencies:
@@ -23,10 +30,7 @@ npm install
 
 2. Set up environment variables:
 ```bash
-# Optional: Port for assets server (default: 3333)
-export HTTP_PORT=3333
-
-# Required for 'listen' action with transcription and evaluation
+# Required only if using 'listen' action for transcription and evaluation
 export OPENAI_API_KEY=your-openai-api-key-here
 ```
 
@@ -34,26 +38,28 @@ export OPENAI_API_KEY=your-openai-api-key-here
 
 ## Usage
 
+This tool comes with an example application using the service and demo page available in https://rti.livetok.io/demo/index.html.  If you want to use it configure your GOOGLE API KEY in applications/livetok.yaml.   You can get one for free in https://aistudio.google.com.
+
 ### Basic Usage
 
 ```bash
 # Run with application and scenario
-npm start -- -a apps/livetok.yaml -s suites/appointment.yaml
+npm start -- -a applications/livetok.yaml -s suites/appointment.yaml
 
 # Run with multiple applications and scenarios (creates matrix)
-npm start -- -a apps/app1.yaml,apps/app2.yaml -s suites/scenario1.yaml,suites/scenario2.yaml
+npm start -- -a applications/app1.yaml,applications/app2.yaml -s scenarios/scenario1.yaml,scenarios/scenario2.yaml
 
-# Run all apps in a folder with all scenarios in another folder
-npm start -- -a apps/ -s suites/
+# Run all applications in a folder with all scenarios in another folder
+npm start -- -a applications/ -s scenarios/
 
 # Run in non-headless mode (show browser)
-npm start -- -a apps/livetok.yaml -s suites/appointment.yaml --headless false
+npm start -- -a applications/livetok.yaml -s scenarios/appointment.yaml --headless false
 
 # Generate performance report
-npm start -- -a apps/livetok.yaml -s suites/appointment.yaml --report test-metrics-report.csv
+npm start -- -a applications/livetok.yaml -s scenarios/appointment.yaml --report test-metrics-report.csv
 
 # Run each combination multiple times
-npm start -- -a apps/livetok.yaml -s suites/appointment.yaml --repeat 5
+npm start -- -a applications/livetok.yaml -s scenarios/appointment.yaml --repeat 5
 ```
 
 ### Command Line Arguments
@@ -224,26 +230,6 @@ Add `metrics: elapsed_time` to any step to include its execution time in the per
 
 When using `--report`, a CSV file will be generated with columns for each step that has metrics enabled.
 
-## Project Structure
-
-```
-├── src/
-│   ├── index.js              # Main CLI entry point
-│   ├── voice-agent-tester.js # Core testing logic
-│   ├── report.js             # CSV report generation
-│   └── server.js             # Assets HTTP server
-├── javascript/               # Browser-injected scripts
-│   ├── audio_input_hooks.js  # Audio recording functionality
-│   ├── audio_output_hooks.js # Speech synthesis functionality
-│   └── recording-processor.js # Audio processing utilities
-├── apps/                     # Application configurations (URL + setup steps)
-│   └── livetok.yaml         # Example application config
-├── suites/                   # Scenario configurations (test steps)
-│   └── appointment.yaml     # Example scenario config
-├── assets/                   # Audio files for speak action
-└── package.json
-```
-
 ## Example
 
 ### Complete Example
@@ -274,14 +260,13 @@ steps:
 npm start -- -a apps/my_app.yaml -s suites/greeting_test.yaml
 ```
 
-
 ## Requirements
 
 - Node.js 18+
 - OpenAI API key (for `listen` action)
 - Chrome/Chromium browser (automatically managed by Puppeteer)
 
-## Troubleshooting
+## Troubleshooting and Debugging tests
 
 ### Browser Issues
 - Try running with `--headless false` to see browser interactions

@@ -5,7 +5,7 @@ tags:
 steps:
   - action: fill
     selector: "input[type='password']"
-    text: ""
+    text: "GOOGLE_API_KEY HERE"
   # - action: select
   #   selector: "#model"
   #   value: "gemini-2.5-flash-preview-native-audio-dialog"
