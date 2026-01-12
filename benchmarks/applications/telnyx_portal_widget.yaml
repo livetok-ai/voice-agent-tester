@@ -4,13 +4,19 @@ steps:
     selector: "telnyx-ai-agent"
   - action: sleep
     time: 5000
-  - action: click
-    selector: "telnyx-ai-agent >>> button"
+  - action: execute_javascript
+    code: |
+      const agent = document.querySelector('telnyx-ai-agent');
+      if (agent && agent.shadowRoot) {
+        const btn = agent.shadowRoot.querySelector('button');
+        if (btn) {
+          btn.click();
+        } else {
+          console.log('Shadow Root content:', agent.shadowRoot.innerHTML);
+          throw new Error('Button not found inside shadow root');
+        }
+      } else {
+        throw new Error('telnyx-ai-agent not found');
+      }
   - action: sleep
     time: 2000
-  - action: speak
-    text: "Hello, tell me about yourself"
-  - action: wait_for_voice
-    metrics: elapsed_time
-  - action: wait_for_silence
-    metrics: elapsed_time
