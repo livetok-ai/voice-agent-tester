@@ -1,4 +1,4 @@
-url: "https://vapi.ai"
+url: "https://vapi.ai/?demo=true&shareKey={{shareKey}}&assistantId={{assistantId}}"
 steps:
   - action: wait_for_element
     selector: "button[aria-label=\"Talk to vapi\"]"

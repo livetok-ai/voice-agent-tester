@@ -41,8 +41,41 @@ function resolveConfigPaths(input) {
   return paths;
 }
 
+// Helper function to parse params string into an object
+function parseParams(paramsString) {
+  if (!paramsString) {
+    return {};
+  }
+
+  const params = {};
+  const pairs = paramsString.split(',');
+
+  for (const pair of pairs) {
+    const [key, ...valueParts] = pair.split('=');
+    if (key && valueParts.length > 0) {
+      params[key.trim()] = valueParts.join('=').trim();
+    }
+  }
+
+  return params;
+}
+
+// Helper function to substitute template variables in URL
+function substituteUrlParams(url, params) {
+  if (!url) return url;
+
+  let result = url;
+  for (const [key, value] of Object.entries(params)) {
+    // Replace {{key}} with value
+    const templatePattern = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+    result = result.replace(templatePattern, value);
+  }
+
+  return result;
+}
+
 // Helper function to load and validate application config
-function loadApplicationConfig(configPath) {
+function loadApplicationConfig(configPath, params = {}) {
   const configFile = fs.readFileSync(configPath, 'utf8');
   const config = YAML.parse(configFile);
 
@@ -50,10 +83,13 @@ function loadApplicationConfig(configPath) {
     throw new Error(`Application config must contain "url" or "html" field: ${configPath}`);
   }
 
+  // Substitute URL template params
+  const url = substituteUrlParams(config.url, params);
+
   return {
     name: path.basename(configPath, path.extname(configPath)),
     path: configPath,
-    url: config.url,
+    url: url,
     html: config.html,
     steps: config.steps || [],
     tags: config.tags || []
@@ -136,6 +172,12 @@ const argv = yargs(hideBin(process.argv))
     description: 'Record video and audio of the test in webm format',
     default: false
   })
+  .option('params', {
+    alias: 'p',
+    type: 'string',
+    description: 'Comma-separated key=value pairs for URL template substitution (e.g., --params assistantId=xxx,shareKey=yyy)',
+    default: null
+  })
   .help()
   .argv;
 
@@ -160,8 +202,14 @@ async function main() {
       throw new Error('No scenario config files found');
     }
 
+    // Parse URL parameters for template substitution
+    const params = parseParams(argv.params);
+    if (Object.keys(params).length > 0) {
+      console.log(`📝 URL parameters: ${JSON.stringify(params)}`);
+    }
+
     // Load all application and scenario configs
-    let applications = applicationPaths.map(loadApplicationConfig);
+    let applications = applicationPaths.map(p => loadApplicationConfig(p, params));
     let scenarios = scenarioPaths.map(loadScenarioConfig);
 
     // Filter applications by tags if specified

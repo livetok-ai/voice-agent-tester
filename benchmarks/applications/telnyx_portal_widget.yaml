@@ -1,4 +1,4 @@
-url: "https://portal.telnyx.com/#/ai-widget-demo?assistantId=assistant-d1df8571-6e73-4537-bc00-ab5b6b3f6e66"
+url: "https://portal.telnyx.com/#/ai-widget-demo?assistantId={{assistantId}}"
 steps:
   - action: wait_for_element
     selector: "telnyx-ai-agent"
