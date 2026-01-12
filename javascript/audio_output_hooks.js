@@ -21,7 +21,20 @@ class AudioElementMonitor {
     this.setupBodyMutationObserver();
     this.scanExistingAudioElements();
     this.setupProgrammaticAudioInterception();
+    this.setupShadowDomInterception();
     console.log("AudioElementMonitor initialized");
+  }
+
+  setupShadowDomInterception() {
+    const monitor = this;
+    const originalAttachShadow = Element.prototype.attachShadow;
+    Element.prototype.attachShadow = function(init) {
+      const shadowRoot = originalAttachShadow.call(this, init);
+      monitor.observeNode(shadowRoot);
+      // Also scan for existing elements in the new shadow root
+      monitor.checkForNewAudioElements(shadowRoot);
+      return shadowRoot;
+    };
   }
 
   setupAudioContext() {
@@ -38,6 +51,16 @@ class AudioElementMonitor {
       // Already set up
       return;
     }
+
+    if (!document.body) {
+      console.log("document.body not available yet, waiting for DOMContentLoaded");
+      window.addEventListener('DOMContentLoaded', () => {
+        this.setupBodyMutationObserver();
+        this.scanExistingAudioElements();
+      });
+      return;
+    }
+
     this.bodyMutationObserver = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         if (mutation.type === 'childList') {
@@ -50,12 +73,27 @@ class AudioElementMonitor {
       });
     });
 
-    this.bodyMutationObserver.observe(document.body, {
+    this.observeNode(document.body);
+    console.log("Body MutationObserver setup complete");
+  }
+
+  observeNode(node) {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.type === 'childList') {
+          mutation.addedNodes.forEach((addedNode) => {
+            if (addedNode.nodeType === Node.ELEMENT_NODE) {
+              this.checkForNewAudioElements(addedNode);
+            }
+          });
+        }
+      });
+    });
+
+    observer.observe(node, {
       childList: true,
       subtree: true
     });
-
-    console.log("Body MutationObserver setup complete");
   }
 
   setupProgrammaticAudioInterception() {

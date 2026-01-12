@@ -109,3 +109,6 @@ Thumbs.db
 
 # Output files
 output/
+
+# Benchmark configurations (Exception)
+!benchmarks/**/*.yaml

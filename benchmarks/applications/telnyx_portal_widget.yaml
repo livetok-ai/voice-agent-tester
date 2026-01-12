@@ -1,0 +1,16 @@
+url: "https://portal.telnyx.com/#/ai-widget-demo?assistantId=assistant-d1df8571-6e73-4537-bc00-ab5b6b3f6e66"
+steps:
+  - action: wait_for_element
+    selector: "telnyx-ai-agent"
+  - action: sleep
+    time: 5000
+  - action: click
+    selector: "telnyx-ai-agent >>> button"
+  - action: sleep
+    time: 2000
+  - action: speak
+    text: "Hello, tell me about yourself"
+  - action: wait_for_voice
+    metrics: elapsed_time
+  - action: wait_for_silence
+    metrics: elapsed_time

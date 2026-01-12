@@ -253,8 +253,8 @@ export class VoiceAgentTester {
       throw new Error('Browser not launched. Call launch() first.');
     }
 
-    // Set the assets server URL in the page context before injecting scripts
-    await this.page.evaluate((url) => {
+    // Set the assets server URL in the page context for every navigation
+    await this.page.evaluateOnNewDocument((url) => {
       window.__assetsServerUrl = url;
     }, this.assetsServerUrl);
 
@@ -269,12 +269,13 @@ export class VoiceAgentTester {
 
     for (const jsFile of jsFiles) {
       try {
-        await this.page.addScriptTag({ path: jsFile });
+        const content = fs.readFileSync(jsFile, 'utf8');
+        await this.page.evaluateOnNewDocument(content);
         if (this.verbose) {
-          console.log(`Injected: ${path.basename(jsFile)}`);
+          console.log(`Configured injection on navigation: ${path.basename(jsFile)}`);
         }
       } catch (error) {
-        console.error(`Error injecting ${jsFile}:`, error.message);
+        console.error(`Error configuring injection for ${jsFile}:`, error.message);
       }
     }
   }
@@ -775,10 +776,10 @@ export class VoiceAgentTester {
 
       await this.launch(url);
 
-      await this.page.goto(url, { waitUntil: 'load' });
-
-      // Inject JavaScript files after the page has loaded
+      // Inject JavaScript files before loading the page
       await this.injectJavaScriptFiles();
+
+      await this.page.goto(url, { waitUntil: 'load' });
 
       await this.page.waitForNetworkIdle({ timeout: 5000, concurrency: 2 });
 
