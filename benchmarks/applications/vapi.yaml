@@ -1,11 +1,11 @@
 url: "https://vapi.ai/?demo=true&shareKey={{shareKey}}&assistantId={{assistantId}}"
 steps:
   - action: wait_for_element
-    selector: "button[aria-label=\"Talk to vapi\"]"
+    selector: "button[aria-label=\"Talk to Vapi\"]"
   - action: sleep
     time: 5000
   - action: click
-    selector: "button[aria-label=\"Talk to vapi\"]"
+    selector: "button[aria-label=\"Talk to Vapi\"]"
   - action: sleep
     time: 2000
   - action: speak

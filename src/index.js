@@ -9,6 +9,7 @@ import YAML from 'yaml';
 import { VoiceAgentTester } from './voice-agent-tester.js';
 import { ReportGenerator } from './report.js';
 import { createServer } from './server.js';
+import { importAssistantsFromProvider, SUPPORTED_PROVIDERS } from './vapi-import.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -178,6 +179,29 @@ const argv = yargs(hideBin(process.argv))
     description: 'Comma-separated key=value pairs for URL template substitution (e.g., --params assistantId=xxx,shareKey=yyy)',
     default: null
   })
+  .option('import-provider', {
+    type: 'string',
+    description: `Import assistants from external provider (${SUPPORTED_PROVIDERS.join(', ')}) before running benchmarks`,
+    choices: SUPPORTED_PROVIDERS
+  })
+  .option('telnyx-api-key', {
+    type: 'string',
+    description: 'Telnyx API key for authentication (required with --import-provider)'
+  })
+  .option('api-key-ref', {
+    type: 'string',
+    description: 'Integration secret reference for the provider API key (created via /v2/integration_secrets)'
+  })
+  .option('vapi-share-key', {
+    type: 'string',
+    description: 'VAPI share key for template substitution',
+    default: '943ccd39-2b2f-40e4-a4b1-757a17f46833'
+  })
+  .option('vapi-assistant-id', {
+    type: 'string',
+    description: 'VAPI assistant ID for template substitution',
+    default: '5bff9f6a-aeaf-448f-ab7a-ed399db50c61'
+  })
   .help()
   .argv;
 
@@ -204,6 +228,37 @@ async function main() {
 
     // Parse URL parameters for template substitution
     const params = parseParams(argv.params);
+
+    // Inject VAPI parameters from CLI options (if not already set via --params)
+    if (argv.vapiShareKey && !params.shareKey) {
+      params.shareKey = argv.vapiShareKey;
+    }
+    if (argv.vapiAssistantId && !params.vapiAssistantId) {
+      params.vapiAssistantId = argv.vapiAssistantId;
+    }
+
+    // Handle provider import if requested
+    if (argv.importProvider) {
+      if (!argv.telnyxApiKey) {
+        throw new Error('--telnyx-api-key is required when using --import-provider');
+      }
+      if (!argv.apiKeyRef) {
+        throw new Error('--api-key-ref is required when using --import-provider');
+      }
+
+      const importResult = await importAssistantsFromProvider({
+        provider: argv.importProvider,
+        apiKeyRef: argv.apiKeyRef,
+        telnyxApiKey: argv.telnyxApiKey
+      });
+
+      // Inject the first imported assistant ID into params
+      if (importResult.assistantId) {
+        params.assistantId = importResult.assistantId;
+        console.log(`📝 Injected assistantId from ${argv.importProvider} import: ${importResult.assistantId}`);
+      }
+    }
+
     if (Object.keys(params).length > 0) {
       console.log(`📝 URL parameters: ${JSON.stringify(params)}`);
     }

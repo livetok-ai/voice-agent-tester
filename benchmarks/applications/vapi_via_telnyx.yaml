@@ -1,7 +1,4 @@
 url: "https://portal.telnyx.com/#/ai-widget-demo?assistantId={{assistantId}}"
-# VAPI parameters for import (used with --import-provider vapi)
-# vapiShareKey: {{vapiShareKey}}
-# vapiAssistantId: {{vapiAssistantId}}
 steps:
   - action: wait_for_element
     selector: "telnyx-ai-agent"
