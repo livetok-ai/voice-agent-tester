@@ -181,28 +181,28 @@ const argv = yargs(hideBin(process.argv))
   })
   .option('provider', {
     type: 'string',
-    description: `Import assistants from external provider (${SUPPORTED_PROVIDERS.join(', ')})`,
-    choices: SUPPORTED_PROVIDERS,
-    demandOption: true
+    description: `Import from external provider (${SUPPORTED_PROVIDERS.join(', ')}) - requires --telnyx-api-key, --private-key, --provider-assistant-id`,
+    choices: SUPPORTED_PROVIDERS
   })
   .option('telnyx-api-key', {
     type: 'string',
-    description: 'Telnyx API key for authentication',
-    demandOption: true
+    description: 'Telnyx API key (required with --provider)'
   })
   .option('private-key', {
     type: 'string',
-    description: 'Provider private API key for authentication (auto-creates integration secret)',
-    demandOption: true
+    description: 'Provider private API key (required with --provider)'
+  })
+  .option('provider-assistant-id', {
+    type: 'string',
+    description: 'Provider assistant ID to import (required with --provider)'
   })
   .option('share-key', {
     type: 'string',
-    description: 'Provider share key for template substitution (optional, for vapi.yaml)'
+    description: 'Provider share key for vapi.yaml'
   })
   .option('assistant-id', {
     type: 'string',
-    description: 'Provider assistant ID to import and benchmark',
-    demandOption: true
+    description: 'Telnyx assistant ID for direct benchmarking'
   })
   .help()
   .argv;
@@ -241,21 +241,35 @@ async function main() {
 
     // Handle provider import if requested
     if (argv.provider) {
+      // Validate required options for provider import
+      if (!argv.telnyxApiKey) {
+        throw new Error('--telnyx-api-key is required when using --provider');
+      }
+      if (!argv.privateKey) {
+        throw new Error('--private-key is required when using --provider');
+      }
+      if (!argv.providerAssistantId) {
+        throw new Error('--provider-assistant-id is required when using --provider');
+      }
+
       const importResult = await importAssistantsFromProvider({
         provider: argv.provider,
         providerApiKey: argv.privateKey,
         telnyxApiKey: argv.telnyxApiKey,
-        assistantId: argv.assistantId
+        assistantId: argv.providerAssistantId
       });
 
-      // Use the first (and typically only) imported assistant
+      // Use the imported assistant
       const selectedAssistant = importResult.assistants[0];
 
-      // Inject the selected assistant ID into params
+      // Inject the imported assistant ID into params
       if (selectedAssistant) {
         params.assistantId = selectedAssistant.id;
         console.log(`📝 Injected assistantId from ${argv.provider} import: ${selectedAssistant.id}`);
       }
+    } else if (!argv.assistantId) {
+      // If no provider and no assistant-id, show error
+      throw new Error('--assistant-id is required when not using --provider');
     }
 
     if (Object.keys(params).length > 0) {
