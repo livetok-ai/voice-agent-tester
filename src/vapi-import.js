@@ -57,16 +57,22 @@ async function createIntegrationSecret({ identifier, token, telnyxApiKey }) {
 }
 
 /**
- * Enable unauthenticated web calls for an assistant.
+ * Configure an imported assistant with web calls enabled, widget settings, and timestamped name.
  * Returns true if successful, false if failed (with warning).
  *
  * @param {Object} options
  * @param {string} options.assistantId - The assistant ID
+ * @param {string} options.assistantName - The original assistant name
  * @param {string} options.telnyxApiKey - Telnyx API key for authentication
  * @returns {Promise<boolean>}
  */
-async function enableWebCalls({ assistantId, telnyxApiKey }) {
-  console.log(`🌐 Enabling web calls for assistant: ${assistantId}`);
+async function configureImportedAssistant({ assistantId, assistantName, telnyxApiKey }) {
+  // Generate UTC timestamp suffix
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const newName = `${assistantName || 'Imported'}_${timestamp}`;
+  
+  console.log(`🔧 Configuring assistant: ${assistantId}`);
+  console.log(`   📝 Renaming to: ${newName}`);
 
   try {
     const response = await fetch(`${TELNYX_ASSISTANTS_ENDPOINT}/${assistantId}`, {
@@ -76,23 +82,40 @@ async function enableWebCalls({ assistantId, telnyxApiKey }) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
+        name: newName,
         telephony_settings: {
           supports_unauthenticated_web_calls: true
+        },
+        widget_settings: {
+          theme: 'dark',
+          audio_visualizer_config: {
+            color: 'verdant',
+            preset: 'roundBars'
+          },
+          start_call_text: '',
+          default_state: 'expanded',
+          position: 'fixed',
+          view_history_url: null,
+          report_issue_url: null,
+          give_feedback_url: null,
+          agent_thinking_text: '',
+          speak_to_interrupt_text: '',
+          logo_icon_url: null
         }
       })
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn(`⚠️  Could not enable web calls for ${assistantId}: ${response.status}`);
+      console.warn(`⚠️  Could not configure assistant ${assistantId}: ${response.status}`);
       console.warn(`   This may require manual configuration in the Telnyx portal.`);
       return false;
     }
 
-    console.log(`✅ Web calls enabled for: ${assistantId}`);
+    console.log(`✅ Assistant configured: ${newName}`);
     return true;
   } catch (error) {
-    console.warn(`⚠️  Error enabling web calls for ${assistantId}: ${error.message}`);
+    console.warn(`⚠️  Error configuring assistant ${assistantId}: ${error.message}`);
     return false;
   }
 }
@@ -161,20 +184,15 @@ export async function importAssistantsFromProvider({ provider, providerApiKey, t
       console.log(`   ${i + 1}. ${a.name || 'Unnamed'} (ID: ${a.id})`);
     });
 
-    // Step 3: Enable web calls for each assistant if not already enabled
-    console.log(`\n🔧 Checking web call settings for imported assistants...`);
+    // Step 3: Configure each assistant (rename with timestamp, enable web calls, set widget settings)
+    console.log(`\n🔧 Configuring imported assistants...`);
     
     for (const assistant of assistants) {
-      const webCallsEnabled = assistant.telephony_settings?.supports_unauthenticated_web_calls;
-      
-      if (!webCallsEnabled) {
-        await enableWebCalls({
-          assistantId: assistant.id,
-          telnyxApiKey
-        });
-      } else {
-        console.log(`✓ Web calls already enabled for: ${assistant.id}`);
-      }
+      await configureImportedAssistant({
+        assistantId: assistant.id,
+        assistantName: assistant.name,
+        telnyxApiKey
+      });
     }
 
     return {
