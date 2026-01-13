@@ -125,16 +125,17 @@ async function configureImportedAssistant({ assistantId, assistantName, telnyxAp
  * 
  * This function:
  * 1. Creates an integration secret from the provider's private API key
- * 2. Imports all assistants from the provider
+ * 2. Imports assistants from the provider (optionally filtered by ID)
  * 3. Enables unauthenticated web calls for each imported assistant
  *
  * @param {Object} options - Import options
  * @param {string} options.provider - External provider name (vapi, elevenlabs, retell)
  * @param {string} options.providerApiKey - The provider's private API key
  * @param {string} options.telnyxApiKey - Telnyx API key for authentication
+ * @param {string} [options.assistantId] - Optional: specific assistant ID to import
  * @returns {Promise<{assistants: Array<{id: string, name: string}>, assistantId: string}>}
  */
-export async function importAssistantsFromProvider({ provider, providerApiKey, telnyxApiKey }) {
+export async function importAssistantsFromProvider({ provider, providerApiKey, telnyxApiKey, assistantId }) {
   // Validate provider
   if (!SUPPORTED_PROVIDERS.includes(provider)) {
     throw new Error(`Unsupported provider: ${provider}. Supported providers: ${SUPPORTED_PROVIDERS.join(', ')}`);
@@ -151,8 +152,15 @@ export async function importAssistantsFromProvider({ provider, providerApiKey, t
       telnyxApiKey
     });
 
-    // Step 2: Import assistants using the secret reference
-    console.log(`📥 Importing assistants using secret: ${secret.identifier}`);
+    // Step 2: Import assistant using the secret reference
+    console.log(`📥 Importing assistant ${assistantId} using secret: ${secret.identifier}`);
+    
+    // Build import request body with specific assistant ID
+    const importBody = {
+      provider: provider,
+      api_key_ref: secret.identifier,
+      import_ids: [assistantId]
+    };
     
     const importResponse = await fetch(TELNYX_IMPORT_ENDPOINT, {
       method: 'POST',
@@ -160,10 +168,7 @@ export async function importAssistantsFromProvider({ provider, providerApiKey, t
         'Authorization': `Bearer ${telnyxApiKey}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        provider: provider,
-        api_key_ref: secret.identifier
-      })
+      body: JSON.stringify(importBody)
     });
 
     if (!importResponse.ok) {
@@ -175,33 +180,44 @@ export async function importAssistantsFromProvider({ provider, providerApiKey, t
     const assistants = importData.data || [];
 
     if (assistants.length === 0) {
-      console.log(`⚠️  No assistants were imported from ${provider}`);
-      return { assistants: [], assistantId: null };
+      throw new Error(`No assistant was imported for ID "${assistantId}"`);
     }
 
-    console.log(`✅ Successfully imported ${assistants.length} assistant(s) from ${provider}`);
-    assistants.forEach((a, i) => {
-      console.log(`   ${i + 1}. ${a.name || 'Unnamed'} (ID: ${a.id})`);
-    });
-
-    // Step 3: Configure each assistant (rename with timestamp, enable web calls, set widget settings)
-    console.log(`\n🔧 Configuring imported assistants...`);
+    // Validate that we got the correct assistant
+    const importedAssistant = assistants[0];
+    const importId = importedAssistant.import_metadata?.import_id;
     
-    for (const assistant of assistants) {
+    if (importId !== assistantId) {
+      throw new Error(`Import mismatch: requested "${assistantId}" but got "${importId}"`);
+    }
+
+    // Check if this is a previously imported assistant (re-using existing Telnyx assistant)
+    const importedAt = importedAssistant.import_metadata?.imported_at;
+    const isReused = importedAt && (Date.now() - new Date(importedAt).getTime() > 60000); // More than 1 minute ago
+    
+    if (isReused) {
+      console.log(`♻️  Re-using previously imported assistant: ${importedAssistant.name} (${importedAssistant.id})`);
+      console.log(`   Originally imported at: ${importedAt}`);
+    } else {
+      console.log(`✅ Successfully imported: ${importedAssistant.name} (${importedAssistant.id})`);
+      
+      // Only configure newly imported assistants (rename with timestamp, enable web calls, set widget settings)
+      console.log(`\n🔧 Configuring imported assistant...`);
+      
       await configureImportedAssistant({
-        assistantId: assistant.id,
-        assistantName: assistant.name,
+        assistantId: importedAssistant.id,
+        assistantName: importedAssistant.name,
         telnyxApiKey
       });
     }
 
     return {
-      assistants: assistants.map(a => ({ 
-        id: a.id, 
-        name: a.name,
-        import_id: a.import_metadata?.import_id 
-      })),
-      assistantId: assistants[0]?.id
+      assistants: [{ 
+        id: importedAssistant.id, 
+        name: importedAssistant.name,
+        import_id: importId 
+      }],
+      assistantId: importedAssistant.id
     };
   } catch (error) {
     console.error(`❌ Failed to import assistants from ${provider}:`, error.message);

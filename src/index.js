@@ -176,32 +176,32 @@ const argv = yargs(hideBin(process.argv))
   .option('params', {
     alias: 'p',
     type: 'string',
-    description: 'Comma-separated key=value pairs for URL template substitution (e.g., --params assistantId=xxx,shareKey=yyy)',
+    description: 'Comma-separated key=value pairs for URL template substitution (e.g., --params key=value)',
     default: null
   })
-  .option('import-provider', {
+  .option('provider', {
     type: 'string',
     description: `Import assistants from external provider (${SUPPORTED_PROVIDERS.join(', ')}) before running benchmarks`,
     choices: SUPPORTED_PROVIDERS
   })
   .option('telnyx-api-key', {
     type: 'string',
-    description: 'Telnyx API key for authentication (required with --import-provider)'
+    description: 'Telnyx API key for authentication',
+    demandOption: true
   })
   .option('private-key', {
     type: 'string',
     description: 'Provider private API key for authentication (auto-creates integration secret)',
-    default: 'efc1eb90-878d-4c01-9250-e24f7827ba91'
+    demandOption: true
   })
   .option('share-key', {
     type: 'string',
-    description: 'Provider share key for template substitution',
-    default: '943ccd39-2b2f-40e4-a4b1-757a17f46833'
+    description: 'Provider share key for template substitution (optional, for vapi.yaml)'
   })
   .option('assistant-id', {
     type: 'string',
-    description: 'Provider assistant ID for template substitution',
-    default: '5bff9f6a-aeaf-448f-ab7a-ed399db50c61'
+    description: 'Provider assistant ID to import and benchmark',
+    demandOption: true
   })
   .help()
   .argv;
@@ -230,7 +230,7 @@ async function main() {
     // Parse URL parameters for template substitution
     const params = parseParams(argv.params);
 
-    // Inject provider parameters from CLI options (if not already set via --params)
+    // Inject CLI options into params (if not already set via --params)
     if (argv.shareKey && !params.shareKey) {
       params.shareKey = argv.shareKey;
     }
@@ -239,47 +239,21 @@ async function main() {
     }
 
     // Handle provider import if requested
-    if (argv.importProvider) {
-      if (!argv.telnyxApiKey) {
-        throw new Error('--telnyx-api-key is required when using --import-provider');
-      }
-      
-      const providerApiKey = argv.privateKey;
-      if (!providerApiKey) {
-        throw new Error('--private-key is required when using --import-provider');
-      }
-
+    if (argv.provider) {
       const importResult = await importAssistantsFromProvider({
-        provider: argv.importProvider,
-        providerApiKey: providerApiKey,
-        telnyxApiKey: argv.telnyxApiKey
+        provider: argv.provider,
+        providerApiKey: argv.privateKey,
+        telnyxApiKey: argv.telnyxApiKey,
+        assistantId: argv.assistantId
       });
 
-      // Select which imported assistant to use
-      let selectedAssistant = null;
-      
-      if (argv.assistantId && importResult.assistants.length > 0) {
-        // Try to find assistant matching the provided ID (check import_id in metadata)
-        selectedAssistant = importResult.assistants.find(a => 
-          a.import_id === argv.assistantId || 
-          a.id === argv.assistantId ||
-          a.id.includes(argv.assistantId)
-        );
-        
-        if (selectedAssistant) {
-          console.log(`🎯 Selected assistant by ID: ${selectedAssistant.name} (${selectedAssistant.id})`);
-        } else {
-          console.warn(`⚠️  No imported assistant matches --assistant-id "${argv.assistantId}", using first imported`);
-          selectedAssistant = importResult.assistants[0];
-        }
-      } else if (importResult.assistants.length > 0) {
-        selectedAssistant = importResult.assistants[0];
-      }
+      // Use the first (and typically only) imported assistant
+      const selectedAssistant = importResult.assistants[0];
 
       // Inject the selected assistant ID into params
       if (selectedAssistant) {
         params.assistantId = selectedAssistant.id;
-        console.log(`📝 Injected assistantId from ${argv.importProvider} import: ${selectedAssistant.id}`);
+        console.log(`📝 Injected assistantId from ${argv.provider} import: ${selectedAssistant.id}`);
       }
     }
 
