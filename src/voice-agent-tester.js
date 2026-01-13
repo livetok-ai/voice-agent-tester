@@ -327,9 +327,7 @@ export class VoiceAgentTester {
         case 'screenshot':
           handlerResult = await this.handleScreenshot(step);
           break;
-        case 'execute_javascript':
-          handlerResult = await this.handleExecuteJavascript(step);
-          break;
+
         default:
           console.log(`Unknown action: ${action}`);
       }
@@ -744,19 +742,7 @@ export class VoiceAgentTester {
     return screenshotPath;
   }
 
-  async handleExecuteJavascript(step) {
-    const code = step.code;
-    if (!code) {
-      throw new Error('No code specified for execute_javascript action');
-    }
 
-    if (this.verbose) {
-      console.log(`Executing JavaScript: ${code}`);
-    }
-
-    const result = await this.page.evaluate(code);
-    return result;
-  }
 
   async saveAudioAsWAV(base64Audio, audioMetadata) {
     try {
