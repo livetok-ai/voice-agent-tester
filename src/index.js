@@ -188,9 +188,10 @@ const argv = yargs(hideBin(process.argv))
     type: 'string',
     description: 'Telnyx API key for authentication (required with --import-provider)'
   })
-  .option('api-key-ref', {
+  .option('vapi-private-key', {
     type: 'string',
-    description: 'Integration secret reference for the provider API key (created via /v2/integration_secrets)'
+    description: 'VAPI private API key for authentication (auto-creates integration secret)',
+    default: 'efc1eb90-878d-4c01-9250-e24f7827ba91'
   })
   .option('vapi-share-key', {
     type: 'string',
@@ -242,13 +243,21 @@ async function main() {
       if (!argv.telnyxApiKey) {
         throw new Error('--telnyx-api-key is required when using --import-provider');
       }
-      if (!argv.apiKeyRef) {
-        throw new Error('--api-key-ref is required when using --import-provider');
+      
+      // Get the provider API key based on provider type
+      let providerApiKey;
+      if (argv.importProvider === 'vapi') {
+        providerApiKey = argv.vapiPrivateKey;
+        if (!providerApiKey) {
+          throw new Error('--vapi-private-key is required when importing from VAPI');
+        }
+      } else {
+        throw new Error(`Provider ${argv.importProvider} requires manual --api-key-ref setup (not yet implemented)`);
       }
 
       const importResult = await importAssistantsFromProvider({
         provider: argv.importProvider,
-        apiKeyRef: argv.apiKeyRef,
+        providerApiKey: providerApiKey,
         telnyxApiKey: argv.telnyxApiKey
       });
 
