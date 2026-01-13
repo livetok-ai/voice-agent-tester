@@ -3,19 +3,8 @@ steps:
   - action: wait_for_element
     selector: "telnyx-ai-agent"
   - action: sleep
-    time: 10000
-  - action: execute_javascript
-    code: |
-      const agent = document.querySelector('telnyx-ai-agent');
-      if (agent && agent.shadowRoot) {
-        const btn = agent.shadowRoot.querySelector('button');
-        if (btn) {
-          btn.click();
-        } else {
-          throw new Error('Button not found inside shadow root');
-        }
-      } else {
-        throw new Error('telnyx-ai-agent not found');
-      }
+    time: 3000
+  - action: click
+    selector: "telnyx-ai-agent"
   - action: sleep
     time: 2000

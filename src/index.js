@@ -255,10 +255,31 @@ async function main() {
         telnyxApiKey: argv.telnyxApiKey
       });
 
-      // Inject the first imported assistant ID into params
-      if (importResult.assistantId) {
-        params.assistantId = importResult.assistantId;
-        console.log(`📝 Injected assistantId from ${argv.importProvider} import: ${importResult.assistantId}`);
+      // Select which imported assistant to use
+      let selectedAssistant = null;
+      
+      if (argv.assistantId && importResult.assistants.length > 0) {
+        // Try to find assistant matching the provided ID (check import_id in metadata)
+        selectedAssistant = importResult.assistants.find(a => 
+          a.import_id === argv.assistantId || 
+          a.id === argv.assistantId ||
+          a.id.includes(argv.assistantId)
+        );
+        
+        if (selectedAssistant) {
+          console.log(`🎯 Selected assistant by ID: ${selectedAssistant.name} (${selectedAssistant.id})`);
+        } else {
+          console.warn(`⚠️  No imported assistant matches --assistant-id "${argv.assistantId}", using first imported`);
+          selectedAssistant = importResult.assistants[0];
+        }
+      } else if (importResult.assistants.length > 0) {
+        selectedAssistant = importResult.assistants[0];
+      }
+
+      // Inject the selected assistant ID into params
+      if (selectedAssistant) {
+        params.assistantId = selectedAssistant.id;
+        console.log(`📝 Injected assistantId from ${argv.importProvider} import: ${selectedAssistant.id}`);
       }
     }
 

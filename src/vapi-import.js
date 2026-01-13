@@ -196,7 +196,11 @@ export async function importAssistantsFromProvider({ provider, providerApiKey, t
     }
 
     return {
-      assistants: assistants.map(a => ({ id: a.id, name: a.name })),
+      assistants: assistants.map(a => ({ 
+        id: a.id, 
+        name: a.name,
+        import_id: a.import_metadata?.import_id 
+      })),
       assistantId: assistants[0]?.id
     };
   } catch (error) {
