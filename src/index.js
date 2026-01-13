@@ -181,8 +181,9 @@ const argv = yargs(hideBin(process.argv))
   })
   .option('provider', {
     type: 'string',
-    description: `Import assistants from external provider (${SUPPORTED_PROVIDERS.join(', ')}) before running benchmarks`,
-    choices: SUPPORTED_PROVIDERS
+    description: `Import assistants from external provider (${SUPPORTED_PROVIDERS.join(', ')})`,
+    choices: SUPPORTED_PROVIDERS,
+    demandOption: true
   })
   .option('telnyx-api-key', {
     type: 'string',
