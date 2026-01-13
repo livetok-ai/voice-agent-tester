@@ -188,19 +188,19 @@ const argv = yargs(hideBin(process.argv))
     type: 'string',
     description: 'Telnyx API key for authentication (required with --import-provider)'
   })
-  .option('vapi-private-key', {
+  .option('private-key', {
     type: 'string',
-    description: 'VAPI private API key for authentication (auto-creates integration secret)',
+    description: 'Provider private API key for authentication (auto-creates integration secret)',
     default: 'efc1eb90-878d-4c01-9250-e24f7827ba91'
   })
-  .option('vapi-share-key', {
+  .option('share-key', {
     type: 'string',
-    description: 'VAPI share key for template substitution',
+    description: 'Provider share key for template substitution',
     default: '943ccd39-2b2f-40e4-a4b1-757a17f46833'
   })
-  .option('vapi-assistant-id', {
+  .option('assistant-id', {
     type: 'string',
-    description: 'VAPI assistant ID for template substitution',
+    description: 'Provider assistant ID for template substitution',
     default: '5bff9f6a-aeaf-448f-ab7a-ed399db50c61'
   })
   .help()
@@ -230,12 +230,12 @@ async function main() {
     // Parse URL parameters for template substitution
     const params = parseParams(argv.params);
 
-    // Inject VAPI parameters from CLI options (if not already set via --params)
-    if (argv.vapiShareKey && !params.shareKey) {
-      params.shareKey = argv.vapiShareKey;
+    // Inject provider parameters from CLI options (if not already set via --params)
+    if (argv.shareKey && !params.shareKey) {
+      params.shareKey = argv.shareKey;
     }
-    if (argv.vapiAssistantId && !params.vapiAssistantId) {
-      params.vapiAssistantId = argv.vapiAssistantId;
+    if (argv.assistantId && !params.assistantId) {
+      params.assistantId = argv.assistantId;
     }
 
     // Handle provider import if requested
@@ -244,15 +244,9 @@ async function main() {
         throw new Error('--telnyx-api-key is required when using --import-provider');
       }
       
-      // Get the provider API key based on provider type
-      let providerApiKey;
-      if (argv.importProvider === 'vapi') {
-        providerApiKey = argv.vapiPrivateKey;
-        if (!providerApiKey) {
-          throw new Error('--vapi-private-key is required when importing from VAPI');
-        }
-      } else {
-        throw new Error(`Provider ${argv.importProvider} requires manual --api-key-ref setup (not yet implemented)`);
+      const providerApiKey = argv.privateKey;
+      if (!providerApiKey) {
+        throw new Error('--private-key is required when using --import-provider');
       }
 
       const importResult = await importAssistantsFromProvider({
