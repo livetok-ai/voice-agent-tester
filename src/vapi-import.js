@@ -17,6 +17,24 @@ const TELNYX_ASSISTANTS_ENDPOINT = `${TELNYX_BASE_URL}/ai/assistants`;
 // Supported providers
 const SUPPORTED_PROVIDERS = ['vapi', 'elevenlabs', 'retell'];
 
+// Default widget settings for benchmarking
+const DEFAULT_WIDGET_SETTINGS = {
+  theme: 'dark',
+  audio_visualizer_config: {
+    color: 'verdant',
+    preset: 'roundBars'
+  },
+  start_call_text: '',
+  default_state: 'expanded',
+  position: 'fixed',
+  view_history_url: null,
+  report_issue_url: null,
+  give_feedback_url: null,
+  agent_thinking_text: '',
+  speak_to_interrupt_text: '',
+  logo_icon_url: null
+};
+
 /**
  * Create an integration secret in Telnyx from a provider's API key.
  *
@@ -57,6 +75,86 @@ async function createIntegrationSecret({ identifier, token, telnyxApiKey }) {
 }
 
 /**
+ * Get assistant details from Telnyx API.
+ *
+ * @param {Object} options
+ * @param {string} options.assistantId - The Telnyx assistant ID
+ * @param {string} options.telnyxApiKey - Telnyx API key
+ * @returns {Promise<Object>} - Assistant details
+ */
+export async function getAssistant({ assistantId, telnyxApiKey }) {
+  const response = await fetch(`${TELNYX_ASSISTANTS_ENDPOINT}/${assistantId}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${telnyxApiKey}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to get assistant: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  
+  // API returns data at root level for single assistant GET
+  if (!data.id) {
+    throw new Error(`Assistant not found: ${assistantId}`);
+  }
+  
+  return data;
+}
+
+/**
+ * Enable unauthenticated web calls for a Telnyx assistant.
+ *
+ * @param {Object} options
+ * @param {string} options.assistantId - The Telnyx assistant ID
+ * @param {string} options.telnyxApiKey - Telnyx API key
+ * @param {Object} options.assistant - Optional existing assistant data to preserve settings
+ * @returns {Promise<boolean>} - true if successful
+ */
+export async function enableWebCalls({ assistantId, telnyxApiKey, assistant }) {
+  console.log(`🔧 Enabling unauthenticated web calls for assistant ${assistantId}...`);
+  
+  // Preserve existing telephony_settings and just enable web calls
+  const telephonySettings = {
+    ...(assistant?.telephony_settings || {}),
+    supports_unauthenticated_web_calls: true
+  };
+
+  // Build request body preserving widget_settings if they exist
+  const requestBody = {
+    telephony_settings: telephonySettings
+  };
+
+  // Use existing widget_settings or set defaults
+  if (assistant?.widget_settings && Object.keys(assistant.widget_settings).length > 0) {
+    requestBody.widget_settings = assistant.widget_settings;
+  } else {
+    requestBody.widget_settings = DEFAULT_WIDGET_SETTINGS;
+  }
+  
+  const response = await fetch(`${TELNYX_ASSISTANTS_ENDPOINT}/${assistantId}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${telnyxApiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to enable web calls: ${response.status} ${errorText}`);
+  }
+
+  console.log(`✅ Unauthenticated web calls enabled`);
+  return true;
+}
+
+/**
  * Configure an imported assistant with web calls enabled, widget settings, and timestamped name.
  * Returns true if successful, false if failed (with warning).
  *
@@ -86,22 +184,7 @@ async function configureImportedAssistant({ assistantId, assistantName, telnyxAp
         telephony_settings: {
           supports_unauthenticated_web_calls: true
         },
-        widget_settings: {
-          theme: 'dark',
-          audio_visualizer_config: {
-            color: 'verdant',
-            preset: 'roundBars'
-          },
-          start_call_text: '',
-          default_state: 'expanded',
-          position: 'fixed',
-          view_history_url: null,
-          report_issue_url: null,
-          give_feedback_url: null,
-          agent_thinking_text: '',
-          speak_to_interrupt_text: '',
-          logo_icon_url: null
-        }
+        widget_settings: DEFAULT_WIDGET_SETTINGS
       })
     });
 

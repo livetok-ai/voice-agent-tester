@@ -3,13 +3,14 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import readline from 'readline';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import YAML from 'yaml';
 import { VoiceAgentTester } from './voice-agent-tester.js';
 import { ReportGenerator } from './report.js';
 import { createServer } from './server.js';
-import { importAssistantsFromProvider, SUPPORTED_PROVIDERS } from './vapi-import.js';
+import { importAssistantsFromProvider, getAssistant, enableWebCalls, SUPPORTED_PROVIDERS } from './vapi-import.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -111,6 +112,20 @@ function loadScenarioConfig(configPath) {
   };
 }
 
+// Helper function to prompt user for y/n response
+function promptUser(question) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase().trim() === 'y' || answer.toLowerCase().trim() === 'yes');
+    });
+  });
+}
+
 // Parse command-line arguments
 const argv = yargs(hideBin(process.argv))
   .option('applications', {
@@ -181,24 +196,32 @@ const argv = yargs(hideBin(process.argv))
   })
   .option('provider', {
     type: 'string',
-    description: `Import from external provider (${SUPPORTED_PROVIDERS.join(', ')}) - requires --telnyx-api-key, --private-key, --provider-assistant-id`,
+    description: `Import from external provider (${SUPPORTED_PROVIDERS.join(', ')}) - requires --api-key, --provider-api-key, --provider-import-id`,
     choices: SUPPORTED_PROVIDERS
   })
-  .option('telnyx-api-key', {
+  .option('api-key', {
     type: 'string',
-    description: 'Telnyx API key (required with --provider)'
+    description: 'Telnyx API key for authentication'
   })
-  .option('private-key', {
+  .option('provider-api-key', {
     type: 'string',
-    description: 'Provider private API key (required with --provider)'
+    description: 'Provider API key (required with --provider)'
   })
-  .option('provider-assistant-id', {
+  .option('provider-import-id', {
     type: 'string',
-    description: 'Provider assistant ID to import (required with --provider)'
+    description: 'Provider assistant/agent ID to import (required with --provider)'
   })
   .option('share-key', {
     type: 'string',
     description: 'Provider share key for vapi.yaml'
+  })
+  .option('agent-id', {
+    type: 'string',
+    description: 'ElevenLabs agent ID for direct benchmarking'
+  })
+  .option('branch-id', {
+    type: 'string',
+    description: 'ElevenLabs branch ID for direct benchmarking'
   })
   .option('assistant-id', {
     type: 'string',
@@ -238,25 +261,31 @@ async function main() {
     if (argv.assistantId && !params.assistantId) {
       params.assistantId = argv.assistantId;
     }
+    if (argv.agentId && !params.agentId) {
+      params.agentId = argv.agentId;
+    }
+    if (argv.branchId && !params.branchId) {
+      params.branchId = argv.branchId;
+    }
 
     // Handle provider import if requested
     if (argv.provider) {
       // Validate required options for provider import
-      if (!argv.telnyxApiKey) {
-        throw new Error('--telnyx-api-key is required when using --provider');
+      if (!argv.apiKey) {
+        throw new Error('--api-key is required when using --provider');
       }
-      if (!argv.privateKey) {
-        throw new Error('--private-key is required when using --provider');
+      if (!argv.providerApiKey) {
+        throw new Error('--provider-api-key is required when using --provider');
       }
-      if (!argv.providerAssistantId) {
-        throw new Error('--provider-assistant-id is required when using --provider');
+      if (!argv.providerImportId) {
+        throw new Error('--provider-import-id is required when using --provider');
       }
 
       const importResult = await importAssistantsFromProvider({
         provider: argv.provider,
-        providerApiKey: argv.privateKey,
-        telnyxApiKey: argv.telnyxApiKey,
-        assistantId: argv.providerAssistantId
+        providerApiKey: argv.providerApiKey,
+        telnyxApiKey: argv.apiKey,
+        assistantId: argv.providerImportId
       });
 
       // Use the imported assistant
@@ -267,9 +296,44 @@ async function main() {
         params.assistantId = selectedAssistant.id;
         console.log(`📝 Injected assistantId from ${argv.provider} import: ${selectedAssistant.id}`);
       }
-    } else if (!argv.assistantId) {
-      // If no provider and no assistant-id, show error
-      throw new Error('--assistant-id is required when not using --provider');
+    } else if (!argv.assistantId && !argv.agentId) {
+      // If no provider and no assistant-id or agent-id, show error
+      throw new Error('--assistant-id or --agent-id is required when not using --provider');
+    } else {
+      // Direct Telnyx use case - optionally check web calls support if api-key provided
+      if (argv.apiKey) {
+        console.log(`\n🔍 Checking assistant configuration...`);
+        try {
+          const assistant = await getAssistant({
+            assistantId: argv.assistantId,
+            telnyxApiKey: argv.apiKey
+          });
+
+          const supportsWebCalls = assistant.telephony_settings?.supports_unauthenticated_web_calls;
+          
+          if (!supportsWebCalls) {
+            console.log(`❌ Unauthenticated web calls: disabled`);
+            console.warn(`\n⚠️  Warning: Assistant "${assistant.name}" does not support unauthenticated web calls.`);
+            console.warn(`   The benchmark may not work correctly without this setting enabled.\n`);
+            
+            const shouldEnable = await promptUser('Would you like to enable unauthenticated web calls? (y/n): ');
+            
+            if (shouldEnable) {
+              await enableWebCalls({
+                assistantId: argv.assistantId,
+                telnyxApiKey: argv.apiKey,
+                assistant
+              });
+            } else {
+              console.log('   Proceeding without enabling web calls...\n');
+            }
+          } else {
+            console.log(`✅ Unauthenticated web calls: enabled`);
+          }
+        } catch (error) {
+          console.log(`⚠️  Could not check assistant: ${error.message}`);
+        }
+      }
     }
 
     if (Object.keys(params).length > 0) {
@@ -466,6 +530,14 @@ async function main() {
       console.log(`\n🎉 All runs completed successfully!`);
     } else {
       console.log(`\n⚠️  Completed with ${results.failed} failure(s).`);
+      
+      // Show helpful hint for direct Telnyx usage (when not using --provider)
+      if (!argv.provider && argv.assistantId) {
+        const editUrl = `https://portal.telnyx.com/#/login/sign-in?redirectTo=/ai/assistants/edit/${argv.assistantId}`;
+        console.log(`\n💡 Tip: Make sure that the "Supports Unauthenticated Web Calls" option is enabled in your Telnyx assistant settings.`);
+        console.log(`   Edit assistant: ${editUrl}`);
+        console.log(`   Or provide --api-key to enable this setting automatically via CLI.`);
+      }
     }
 
     // Set exit code based on results
