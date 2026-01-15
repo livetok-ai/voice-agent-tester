@@ -164,10 +164,11 @@ export async function enableWebCalls({ assistantId, telnyxApiKey, assistant }) {
  * @param {string} options.telnyxApiKey - Telnyx API key for authentication
  * @returns {Promise<boolean>}
  */
-async function configureImportedAssistant({ assistantId, assistantName, telnyxApiKey }) {
+async function configureImportedAssistant({ assistantId, assistantName, telnyxApiKey, provider }) {
   // Generate UTC timestamp suffix
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const newName = `${assistantName || 'Imported'}_${timestamp}`;
+  const providerLabel = provider ? `_${provider}` : '';
+  const newName = `${assistantName || 'Imported'}${providerLabel}_${timestamp}`;
   
   console.log(`🔧 Configuring assistant: ${assistantId}`);
   console.log(`   📝 Renaming to: ${newName}`);
@@ -181,6 +182,7 @@ async function configureImportedAssistant({ assistantId, assistantName, telnyxAp
       },
       body: JSON.stringify({
         name: newName,
+        model: 'Qwen/Qwen3-235B-A22',
         telephony_settings: {
           supports_unauthenticated_web_calls: true
         },
@@ -290,7 +292,8 @@ export async function importAssistantsFromProvider({ provider, providerApiKey, t
       await configureImportedAssistant({
         assistantId: importedAssistant.id,
         assistantName: importedAssistant.name,
-        telnyxApiKey
+        telnyxApiKey,
+        provider
       });
     }
 
