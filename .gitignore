@@ -110,5 +110,9 @@ Thumbs.db
 # Output files
 output/
 
+# GitHub Actions (Exception)
+!.github/**/*.yml
+!.github/**/*.yaml
+
 # Benchmark configurations (Exception)
 !benchmarks/**/*.yaml

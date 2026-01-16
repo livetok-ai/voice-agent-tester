@@ -1,0 +1,39 @@
+name: Publish release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    if: github.event.release.prerelease == false
+    name: "@telnyx/voice-agent-tester Publish release"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: "main"
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git user
+        run: |
+          git config user.name TelnyxIntegrations
+          git config user.email integrations@telnyx.com
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          registry-url: https://registry.npmjs.org/
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish package
+        run: npm publish --access public
+        env:
+          CI: true
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_CI_TOKEN }}
