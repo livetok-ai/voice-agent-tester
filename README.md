@@ -1,5 +1,10 @@
 # Voice Agent Tester
 
+[![CI](https://github.com/team-telnyx/voice-agent-tester/actions/workflows/ci.yml/badge.svg)](https://github.com/team-telnyx/voice-agent-tester/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/@telnyx/voice-agent-tester.svg)](https://www.npmjs.com/package/@telnyx/voice-agent-tester)
+
+> **Note:** This is a [Telnyx](https://telnyx.com) fork of the original [livetok-ai/voice-agent-tester](https://github.com/livetok-ai/voice-agent-tester) with ongoing updates and improvements.
+
 A command-line tool for automated testing of voice agents using Puppeteer. This tool allows you to create test scenarios that interact with voice-enabled web applications by simulating user actions, speaking audio, listening for responses, and measuring performance metrics.
 
 ## Features

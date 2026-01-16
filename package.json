@@ -1,5 +1,5 @@
 {
-  "name": "voice-agent-tester",
+  "name": "@telnyx/voice-agent-tester",
   "version": "1.0.0",
   "description": "A command-line tool to test voice agents using Puppeteer",
   "main": "src/index.js",
@@ -8,10 +8,19 @@
     "start": "node src/index.js",
     "server": "node src/server.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "release": "release-it"
   },
   "bin": {
     "voice-agent-tester": "./src/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/team-telnyx/voice-agent-tester.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "@telnyx:registry": "https://registry.npmjs.org"
   },
   "dependencies": {
     "@puppeteer/browsers": "^2.4.0",
@@ -25,7 +34,9 @@
   },
   "devDependencies": {
     "@jest/globals": "^29.0.0",
-    "jest": "^29.0.0"
+    "@release-it/conventional-changelog": "^8.0.0",
+    "jest": "^29.0.0",
+    "release-it": "^17.0.0"
   },
   "jest": {
     "testEnvironment": "node",
