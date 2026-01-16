@@ -7,6 +7,102 @@ const originalCreateElement = document.createElement;
 // Set to track programmatically created Audio instances
 const programmaticAudioInstances = new Set();
 
+// Track RTCPeerConnections for RTP stats
+const rtcPeerConnections = new Set();
+const OriginalRTCPeerConnection = window.RTCPeerConnection;
+
+// Intercept RTCPeerConnection creation
+window.RTCPeerConnection = function(...args) {
+  const pc = new OriginalRTCPeerConnection(...args);
+  rtcPeerConnections.add(pc);
+  console.log(`🔗 RTCPeerConnection created (total: ${rtcPeerConnections.size})`);
+  
+  // Remove from set when connection is closed
+  const originalClose = pc.close.bind(pc);
+  pc.close = function() {
+    rtcPeerConnections.delete(pc);
+    console.log(`🔗 RTCPeerConnection closed (remaining: ${rtcPeerConnections.size})`);
+    return originalClose();
+  };
+  
+  // Also track connection state changes
+  pc.addEventListener('connectionstatechange', () => {
+    if (pc.connectionState === 'closed' || pc.connectionState === 'failed') {
+      rtcPeerConnections.delete(pc);
+    }
+  });
+  
+  return pc;
+};
+
+// Preserve prototype chain
+window.RTCPeerConnection.prototype = OriginalRTCPeerConnection.prototype;
+Object.setPrototypeOf(window.RTCPeerConnection, OriginalRTCPeerConnection);
+
+// Function to get RTP stats from all active peer connections
+window.__getRtpStats = async function() {
+  const allStats = [];
+  
+  for (const pc of rtcPeerConnections) {
+    try {
+      const stats = await pc.getStats();
+      const pcStats = {
+        connectionState: pc.connectionState,
+        iceConnectionState: pc.iceConnectionState,
+        signalingState: pc.signalingState,
+        inboundAudio: [],
+        outboundAudio: [],
+        candidatePairs: []
+      };
+      
+      stats.forEach(report => {
+        if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+          pcStats.inboundAudio.push({
+            packetsReceived: report.packetsReceived,
+            packetsLost: report.packetsLost,
+            bytesReceived: report.bytesReceived,
+            jitter: report.jitter,
+            audioLevel: report.audioLevel,
+            totalAudioEnergy: report.totalAudioEnergy,
+            totalSamplesReceived: report.totalSamplesReceived,
+            concealedSamples: report.concealedSamples,
+            silentConcealedSamples: report.silentConcealedSamples,
+            codecId: report.codecId
+          });
+        } else if (report.type === 'outbound-rtp' && report.kind === 'audio') {
+          pcStats.outboundAudio.push({
+            packetsSent: report.packetsSent,
+            bytesSent: report.bytesSent,
+            targetBitrate: report.targetBitrate,
+            codecId: report.codecId
+          });
+        } else if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+          pcStats.candidatePairs.push({
+            state: report.state,
+            localCandidateId: report.localCandidateId,
+            remoteCandidateId: report.remoteCandidateId,
+            currentRoundTripTime: report.currentRoundTripTime,
+            availableOutgoingBitrate: report.availableOutgoingBitrate
+          });
+        }
+      });
+      
+      allStats.push(pcStats);
+    } catch (error) {
+      allStats.push({
+        error: error.message,
+        connectionState: pc.connectionState
+      });
+    }
+  }
+  
+  return {
+    timestamp: Date.now(),
+    connectionCount: rtcPeerConnections.size,
+    connections: allStats
+  };
+};
+
 class AudioElementMonitor {
   constructor() {
     this.monitoredElements = new Map();
@@ -601,6 +697,43 @@ document.addEventListener('audio-monitor-audiostop', (event) => {
 });
 
 window.audioMonitor = audioMonitor;
+
+// Expose a diagnostic function to get detailed audio monitoring state
+window.__getAudioDiagnostics = function() {
+  const diagnostics = {
+    timestamp: Date.now(),
+    audioContextState: audioMonitor.audioContext ? audioMonitor.audioContext.state : 'not-created',
+    monitoredElementsCount: audioMonitor.monitoredElements.size,
+    elements: []
+  };
+
+  audioMonitor.monitoredElements.forEach((monitorData, elementId) => {
+    const { analyser, dataArray, silenceThreshold, isPlaying, lastAudioTime, isProgrammatic } = monitorData;
+    
+    // Get current audio level if analyser is available
+    let currentLevel = null;
+    let currentMaxLevel = null;
+    if (analyser && dataArray) {
+      analyser.getByteFrequencyData(dataArray);
+      currentLevel = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+      currentMaxLevel = Math.max(...dataArray);
+    }
+
+    diagnostics.elements.push({
+      elementId,
+      isPlaying,
+      isProgrammatic: !!isProgrammatic,
+      silenceThreshold,
+      currentAudioLevel: currentLevel !== null ? currentLevel.toFixed(2) : 'unavailable',
+      currentMaxLevel: currentMaxLevel !== null ? currentMaxLevel : 'unavailable',
+      wouldTriggerAudioStart: currentLevel !== null ? currentLevel > silenceThreshold : 'unknown',
+      lastAudioTime,
+      timeSinceLastAudio: lastAudioTime ? Date.now() - lastAudioTime : null
+    });
+  });
+
+  return diagnostics;
+};
 
 // Recording functionality
 let isRecording = false;

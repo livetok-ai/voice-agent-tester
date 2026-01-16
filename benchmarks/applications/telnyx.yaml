@@ -7,4 +7,4 @@ steps:
   - action: click
     selector: "telnyx-ai-agent"
   - action: sleep
-    time: 2000
+    time: 4000

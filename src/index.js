@@ -227,6 +227,12 @@ const argv = yargs(hideBin(process.argv))
     type: 'string',
     description: 'Telnyx assistant ID for direct benchmarking'
   })
+  .option('debug', {
+    alias: 'd',
+    type: 'boolean',
+    description: 'Enable detailed timeout diagnostics for audio events',
+    default: false
+  })
   .help()
   .argv;
 
@@ -423,7 +429,8 @@ async function main() {
         headless: argv.headless,
         assetsServerUrl: argv.assetsServer,
         reportGenerator: reportGenerator,
-        record: argv.record
+        record: argv.record,
+        debug: argv.debug
       });
 
       try {
@@ -431,13 +438,16 @@ async function main() {
         console.log(`✅ Completed successfully (Run ${runNumber}/${totalRuns})`);
         return { success: true };
       } catch (error) {
+        // Store only the first line for summary, but print full message here (with diagnostics)
+        const shortMessage = error.message.split('\n')[0];
         const errorInfo = {
           app: app.name,
           scenario: scenario.name,
           repetition,
-          error: error.message
+          error: shortMessage
         };
-        console.error(`❌ Error (Run ${runNumber}/${totalRuns}):`, error.message);
+        // Print full diagnostics here (only place they appear)
+        console.error(`❌ Error (Run ${runNumber}/${totalRuns}):\n${error.message}`);
         return { success: false, error: errorInfo };
       }
     }
