@@ -10,7 +10,7 @@ import YAML from 'yaml';
 import { VoiceAgentTester } from './voice-agent-tester.js';
 import { ReportGenerator } from './report.js';
 import { createServer } from './server.js';
-import { importAssistantsFromProvider, getAssistant, enableWebCalls, SUPPORTED_PROVIDERS } from './vapi-import.js';
+import { importAssistantsFromProvider, getAssistant, enableWebCalls, SUPPORTED_PROVIDERS } from './provider-import.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
