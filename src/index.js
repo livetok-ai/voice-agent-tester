@@ -3,12 +3,14 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import readline from 'readline';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import YAML from 'yaml';
 import { VoiceAgentTester } from './voice-agent-tester.js';
 import { ReportGenerator } from './report.js';
 import { createServer } from './server.js';
+import { importAssistantsFromProvider, getAssistant, enableWebCalls, SUPPORTED_PROVIDERS } from './vapi-import.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,8 +43,41 @@ function resolveConfigPaths(input) {
   return paths;
 }
 
+// Helper function to parse params string into an object
+function parseParams(paramsString) {
+  if (!paramsString) {
+    return {};
+  }
+
+  const params = {};
+  const pairs = paramsString.split(',');
+
+  for (const pair of pairs) {
+    const [key, ...valueParts] = pair.split('=');
+    if (key && valueParts.length > 0) {
+      params[key.trim()] = valueParts.join('=').trim();
+    }
+  }
+
+  return params;
+}
+
+// Helper function to substitute template variables in URL
+function substituteUrlParams(url, params) {
+  if (!url) return url;
+
+  let result = url;
+  for (const [key, value] of Object.entries(params)) {
+    // Replace {{key}} with value
+    const templatePattern = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+    result = result.replace(templatePattern, value);
+  }
+
+  return result;
+}
+
 // Helper function to load and validate application config
-function loadApplicationConfig(configPath) {
+function loadApplicationConfig(configPath, params = {}) {
   const configFile = fs.readFileSync(configPath, 'utf8');
   const config = YAML.parse(configFile);
 
@@ -50,10 +85,13 @@ function loadApplicationConfig(configPath) {
     throw new Error(`Application config must contain "url" or "html" field: ${configPath}`);
   }
 
+  // Substitute URL template params
+  const url = substituteUrlParams(config.url, params);
+
   return {
     name: path.basename(configPath, path.extname(configPath)),
     path: configPath,
-    url: config.url,
+    url: url,
     html: config.html,
     steps: config.steps || [],
     tags: config.tags || []
@@ -72,6 +110,20 @@ function loadScenarioConfig(configPath) {
     background: config.background || null,
     tags: config.tags || []
   };
+}
+
+// Helper function to prompt user for y/n response
+function promptUser(question) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase().trim() === 'y' || answer.toLowerCase().trim() === 'yes');
+    });
+  });
 }
 
 // Parse command-line arguments
@@ -136,6 +188,51 @@ const argv = yargs(hideBin(process.argv))
     description: 'Record video and audio of the test in webm format',
     default: false
   })
+  .option('params', {
+    alias: 'p',
+    type: 'string',
+    description: 'Comma-separated key=value pairs for URL template substitution (e.g., --params key=value)',
+    default: null
+  })
+  .option('provider', {
+    type: 'string',
+    description: `Import from external provider (${SUPPORTED_PROVIDERS.join(', ')}) - requires --api-key, --provider-api-key, --provider-import-id`,
+    choices: SUPPORTED_PROVIDERS
+  })
+  .option('api-key', {
+    type: 'string',
+    description: 'Telnyx API key for authentication'
+  })
+  .option('provider-api-key', {
+    type: 'string',
+    description: 'Provider API key (required with --provider)'
+  })
+  .option('provider-import-id', {
+    type: 'string',
+    description: 'Provider assistant/agent ID to import (required with --provider)'
+  })
+  .option('share-key', {
+    type: 'string',
+    description: 'Provider share key for vapi.yaml'
+  })
+  .option('agent-id', {
+    type: 'string',
+    description: 'ElevenLabs agent ID for direct benchmarking'
+  })
+  .option('branch-id', {
+    type: 'string',
+    description: 'ElevenLabs branch ID for direct benchmarking'
+  })
+  .option('assistant-id', {
+    type: 'string',
+    description: 'Telnyx assistant ID for direct benchmarking'
+  })
+  .option('debug', {
+    alias: 'd',
+    type: 'boolean',
+    description: 'Enable detailed timeout diagnostics for audio events',
+    default: false
+  })
   .help()
   .argv;
 
@@ -160,8 +257,97 @@ async function main() {
       throw new Error('No scenario config files found');
     }
 
+    // Parse URL parameters for template substitution
+    const params = parseParams(argv.params);
+
+    // Inject CLI options into params (if not already set via --params)
+    if (argv.shareKey && !params.shareKey) {
+      params.shareKey = argv.shareKey;
+    }
+    if (argv.assistantId && !params.assistantId) {
+      params.assistantId = argv.assistantId;
+    }
+    if (argv.agentId && !params.agentId) {
+      params.agentId = argv.agentId;
+    }
+    if (argv.branchId && !params.branchId) {
+      params.branchId = argv.branchId;
+    }
+
+    // Handle provider import if requested
+    if (argv.provider) {
+      // Validate required options for provider import
+      if (!argv.apiKey) {
+        throw new Error('--api-key is required when using --provider');
+      }
+      if (!argv.providerApiKey) {
+        throw new Error('--provider-api-key is required when using --provider');
+      }
+      if (!argv.providerImportId) {
+        throw new Error('--provider-import-id is required when using --provider');
+      }
+
+      const importResult = await importAssistantsFromProvider({
+        provider: argv.provider,
+        providerApiKey: argv.providerApiKey,
+        telnyxApiKey: argv.apiKey,
+        assistantId: argv.providerImportId
+      });
+
+      // Use the imported assistant
+      const selectedAssistant = importResult.assistants[0];
+
+      // Inject the imported assistant ID into params
+      if (selectedAssistant) {
+        params.assistantId = selectedAssistant.id;
+        console.log(`📝 Injected assistantId from ${argv.provider} import: ${selectedAssistant.id}`);
+      }
+    } else if (!argv.assistantId && !argv.agentId) {
+      // If no provider and no assistant-id or agent-id, show error
+      throw new Error('--assistant-id or --agent-id is required when not using --provider');
+    } else {
+      // Direct Telnyx use case - optionally check web calls support if api-key provided
+      if (argv.apiKey) {
+        console.log(`\n🔍 Checking assistant configuration...`);
+        try {
+          const assistant = await getAssistant({
+            assistantId: argv.assistantId,
+            telnyxApiKey: argv.apiKey
+          });
+
+          const supportsWebCalls = assistant.telephony_settings?.supports_unauthenticated_web_calls;
+          
+          if (!supportsWebCalls) {
+            console.log(`❌ Unauthenticated web calls: disabled`);
+            console.warn(`\n⚠️  Warning: Assistant "${assistant.name}" does not support unauthenticated web calls.`);
+            console.warn(`   The benchmark may not work correctly without this setting enabled.\n`);
+            
+            const shouldEnable = await promptUser('Would you like to enable unauthenticated web calls? (y/n): ');
+            
+            if (shouldEnable) {
+              await enableWebCalls({
+                assistantId: argv.assistantId,
+                telnyxApiKey: argv.apiKey,
+                assistant
+              });
+            } else {
+              console.log('   Proceeding without enabling web calls...\n');
+            }
+          } else {
+            console.log(`✅ Unauthenticated web calls: enabled`);
+          }
+        } catch (error) {
+          console.log(`⚠️  Could not check assistant: ${error.message}`);
+        }
+      }
+    }
+
+    if (Object.keys(params).length > 0) {
+      console.log(`📝 URL parameters: ${JSON.stringify(params)}`);
+    }
+
     // Load all application and scenario configs
-    let applications = applicationPaths.map(loadApplicationConfig);
+    let applications = applicationPaths.map(p => loadApplicationConfig(p, params));
     let scenarios = scenarioPaths.map(loadScenarioConfig);
 
     // Filter applications by tags if specified
@@ -243,7 +429,8 @@ async function main() {
         headless: argv.headless,
         assetsServerUrl: argv.assetsServer,
         reportGenerator: reportGenerator,
-        record: argv.record
+        record: argv.record,
+        debug: argv.debug
       });
 
       try {
@@ -251,13 +438,16 @@ async function main() {
         console.log(`✅ Completed successfully (Run ${runNumber}/${totalRuns})`);
         return { success: true };
       } catch (error) {
+        // Store only the first line for summary, but print full message here (with diagnostics)
+        const shortMessage = error.message.split('\n')[0];
         const errorInfo = {
           app: app.name,
           scenario: scenario.name,
           repetition,
-          error: error.message
+          error: shortMessage
         };
-        console.error(`❌ Error (Run ${runNumber}/${totalRuns}):`, error.message);
+        // Print full diagnostics here (only place they appear)
+        console.error(`❌ Error (Run ${runNumber}/${totalRuns}):\n${error.message}`);
         return { success: false, error: errorInfo };
       }
     }
@@ -350,6 +540,14 @@ async function main() {
       console.log(`\n🎉 All runs completed successfully!`);
     } else {
       console.log(`\n⚠️  Completed with ${results.failed} failure(s).`);
+      
+      // Show helpful hint for direct Telnyx usage (when not using --provider)
+      if (!argv.provider && argv.assistantId) {
+        const editUrl = `https://portal.telnyx.com/#/login/sign-in?redirectTo=/ai/assistants/edit/${argv.assistantId}`;
+        console.log(`\n💡 Tip: Make sure that the "Supports Unauthenticated Web Calls" option is enabled in your Telnyx assistant settings.`);
+        console.log(`   Edit assistant: ${editUrl}`);
+        console.log(`   Or provide --api-key to enable this setting automatically via CLI.`);
+      }
     }
 
     // Set exit code based on results

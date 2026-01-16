@@ -1,0 +1,10 @@
+url: "https://elevenlabs.io/app/talk-to?agent_id={{agentId}}&branch_id={{branchId}}"
+steps:
+  - action: wait_for_element
+    selector: "button[data-agent-id]"
+  - action: sleep
+    time: 3000
+  - action: click
+    selector: "button[data-agent-id]"
+  - action: sleep
+    time: 2000

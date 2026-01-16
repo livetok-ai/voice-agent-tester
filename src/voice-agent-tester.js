@@ -14,6 +14,7 @@ export class VoiceAgentTester {
   constructor(options = {}) {
     this.verbose = options.verbose || false;
     this.headless = options.headless || false;
+    this.debug = options.debug || false;
     this.browser = null;
     this.page = null;
     this.pendingPromises = new Map(); // Map of eventType -> Array of {resolve, reject, timeoutId}
@@ -31,8 +32,106 @@ export class VoiceAgentTester {
 
   waitForAudioEvent(eventType, timeout = 30000) {
     return new Promise((resolve, reject) => {
+      let diagnosticIntervalId = null;
+      
+      // Helper function to collect diagnostics (only used when debug is enabled)
+      const collectDiagnostics = async () => {
+        if (!this.debug) return null;
+        
+        try {
+          if (this.page) {
+            // Collect audio diagnostics
+            const audioInfo = await this.page.evaluate(() => {
+              const info = {
+                audioMonitorAvailable: typeof window.audioMonitor !== 'undefined',
+                audioDiagnosticsAvailable: typeof window.__getAudioDiagnostics === 'function',
+                rtpStatsAvailable: typeof window.__getRtpStats === 'function',
+                monitoredElementsCount: 0,
+                monitoredElements: [],
+                mediaStreamsInfo: null,
+                audioContextState: null,
+                timestamp: Date.now()
+              };
+
+              // Use detailed diagnostics function if available
+              if (typeof window.__getAudioDiagnostics === 'function') {
+                const detailed = window.__getAudioDiagnostics();
+                info.monitoredElementsCount = detailed.monitoredElementsCount;
+                info.audioContextState = detailed.audioContextState;
+                info.monitoredElements = detailed.elements;
+              } else if (window.audioMonitor && window.audioMonitor.monitoredElements) {
+                // Fallback to basic info
+                info.monitoredElementsCount = window.audioMonitor.monitoredElements.size;
+                window.audioMonitor.monitoredElements.forEach((data, elementId) => {
+                  info.monitoredElements.push({
+                    elementId,
+                    isPlaying: data.isPlaying,
+                    lastAudioTime: data.lastAudioTime,
+                    silenceThreshold: data.silenceThreshold,
+                    isProgrammatic: data.isProgrammatic || false,
+                    timeSinceLastAudio: data.lastAudioTime ? Date.now() - data.lastAudioTime : null
+                  });
+                });
+              }
+
+              if (typeof window.__getMediaStreamInfo === 'function') {
+                info.mediaStreamsInfo = window.__getMediaStreamInfo();
+              }
+
+              return info;
+            });
+
+            // Collect RTP stats separately (async function in browser)
+            let rtpStats = null;
+            try {
+              rtpStats = await this.page.evaluate(async () => {
+                if (typeof window.__getRtpStats === 'function') {
+                  return await window.__getRtpStats();
+                }
+                return null;
+              });
+            } catch (rtpError) {
+              // RTP stats collection failed, continue without them
+            }
+
+            return {
+              ...audioInfo,
+              rtpStats
+            };
+          }
+        } catch (diagError) {
+          console.error('Failed to collect diagnostics:', diagError.message);
+        }
+        return null;
+      };
+
+      // Start periodic diagnostic logging (every 10 seconds) - only when debug is enabled
+      const startTime = Date.now();
+      if (this.debug) {
+        diagnosticIntervalId = setInterval(async () => {
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          const diagnostics = await collectDiagnostics();
+          
+          if (diagnostics) {
+            const elementsInfo = diagnostics.monitoredElements.length > 0
+              ? diagnostics.monitoredElements.map(e => 
+                  `${e.elementId}(playing=${e.isPlaying})`
+                ).join(', ')
+              : 'none';
+            console.log(`\t⏱️ Still waiting for '${eventType}'... [${elapsed}s elapsed, monitored: ${diagnostics.monitoredElementsCount}, elements: ${elementsInfo}]`);
+          } else {
+            console.log(`\t⏱️ Still waiting for '${eventType}'... [${elapsed}s elapsed]`);
+          }
+        }, 10000);
+      }
+
       // Set up timeout
-      const timeoutId = setTimeout(() => {
+      const timeoutId = setTimeout(async () => {
+        // Clear diagnostic interval
+        if (diagnosticIntervalId) {
+          clearInterval(diagnosticIntervalId);
+        }
+
         // Remove this promise from pending list
         const promises = this.pendingPromises.get(eventType) || [];
         const index = promises.findIndex(p => p.resolve === resolve);
@@ -42,14 +141,120 @@ export class VoiceAgentTester {
             this.pendingPromises.delete(eventType);
           }
         }
-        reject(new Error(`Timeout waiting for ${eventType} event after ${timeout}ms`));
+
+        // Build error message - detailed only when debug is enabled
+        let errorMessage = `Timeout waiting for '${eventType}' event after ${timeout}ms`;
+        
+        if (this.debug) {
+          // Collect browser-side diagnostics before rejecting
+          const diagnostics = await collectDiagnostics();
+          
+          if (diagnostics) {
+            errorMessage += '\n\n📊 Audio Monitor Diagnostics:';
+            errorMessage += `\n  - Audio monitor available: ${diagnostics.audioMonitorAvailable}`;
+            if (diagnostics.audioContextState) {
+              errorMessage += `\n  - AudioContext state: ${diagnostics.audioContextState}`;
+            }
+            errorMessage += `\n  - Monitored elements count: ${diagnostics.monitoredElementsCount}`;
+            
+            if (diagnostics.monitoredElements.length > 0) {
+              errorMessage += '\n  - Monitored elements:';
+              for (const elem of diagnostics.monitoredElements) {
+                errorMessage += `\n    • ${elem.elementId}:`;
+                errorMessage += `\n        isPlaying=${elem.isPlaying}, isProgrammatic=${elem.isProgrammatic}`;
+                
+                // Include audio level info if available
+                if (elem.currentAudioLevel !== undefined) {
+                  errorMessage += `\n        audioLevel=${elem.currentAudioLevel} (threshold=${elem.silenceThreshold})`;
+                  if (elem.wouldTriggerAudioStart !== undefined) {
+                    errorMessage += `, wouldTrigger=${elem.wouldTriggerAudioStart}`;
+                  }
+                }
+                
+                if (elem.timeSinceLastAudio !== null) {
+                  errorMessage += `\n        lastAudioAge=${elem.timeSinceLastAudio}ms`;
+                }
+              }
+            } else {
+              errorMessage += '\n  ⚠️ No audio elements are being monitored. This may indicate:';
+              errorMessage += '\n    • The page has not created an audio element yet';
+              errorMessage += '\n    • The audio element does not have a valid srcObject/src';
+              errorMessage += '\n    • The audio hooks were not properly injected';
+            }
+            
+            if (diagnostics.mediaStreamsInfo) {
+              errorMessage += `\n  - Media streams (input): ${diagnostics.mediaStreamsInfo.totalStreams} stream(s)`;
+            }
+
+            // Add RTP stats if available
+            if (diagnostics.rtpStats) {
+              errorMessage += '\n\n📡 WebRTC/RTP Stats:';
+              errorMessage += `\n  - Active connections: ${diagnostics.rtpStats.connectionCount}`;
+              
+              if (diagnostics.rtpStats.connections && diagnostics.rtpStats.connections.length > 0) {
+                diagnostics.rtpStats.connections.forEach((conn, idx) => {
+                  errorMessage += `\n  - Connection ${idx + 1}:`;
+                  errorMessage += `\n      state=${conn.connectionState}, ice=${conn.iceConnectionState}`;
+                  
+                  if (conn.inboundAudio && conn.inboundAudio.length > 0) {
+                    conn.inboundAudio.forEach((audio, audioIdx) => {
+                      errorMessage += `\n      Inbound Audio ${audioIdx + 1}:`;
+                      errorMessage += `\n        packets: received=${audio.packetsReceived}, lost=${audio.packetsLost}`;
+                      errorMessage += `\n        bytes: ${audio.bytesReceived}`;
+                      if (audio.jitter !== undefined) {
+                        errorMessage += `, jitter=${audio.jitter.toFixed(4)}s`;
+                      }
+                      if (audio.audioLevel !== undefined) {
+                        errorMessage += `\n        audioLevel=${audio.audioLevel.toFixed(4)}`;
+                      }
+                      if (audio.concealedSamples !== undefined) {
+                        errorMessage += `\n        concealed=${audio.concealedSamples}, silentConcealed=${audio.silentConcealedSamples}`;
+                      }
+                    });
+                  } else {
+                    errorMessage += '\n      ⚠️ No inbound audio streams';
+                  }
+                  
+                  if (conn.outboundAudio && conn.outboundAudio.length > 0) {
+                    conn.outboundAudio.forEach((audio, audioIdx) => {
+                      errorMessage += `\n      Outbound Audio ${audioIdx + 1}:`;
+                      errorMessage += `\n        packets: sent=${audio.packetsSent}, bytes=${audio.bytesSent}`;
+                    });
+                  }
+                  
+                  if (conn.candidatePairs && conn.candidatePairs.length > 0) {
+                    const pair = conn.candidatePairs[0];
+                    if (pair.currentRoundTripTime !== undefined) {
+                      errorMessage += `\n      RTT: ${(pair.currentRoundTripTime * 1000).toFixed(1)}ms`;
+                    }
+                  }
+                });
+              } else if (diagnostics.rtpStats.connectionCount === 0) {
+                errorMessage += '\n  ⚠️ No WebRTC connections established';
+              }
+            }
+          } else {
+            errorMessage += '\n  (Could not collect browser diagnostics)';
+          }
+        }
+
+        reject(new Error(errorMessage));
       }, timeout);
+
+      // Store reference to clear interval on resolve
+      const originalResolve = resolve;
+      const wrappedResolve = (value) => {
+        if (diagnosticIntervalId) {
+          clearInterval(diagnosticIntervalId);
+        }
+        originalResolve(value);
+      };
 
       // Register this promise to be resolved when event arrives
       if (!this.pendingPromises.has(eventType)) {
         this.pendingPromises.set(eventType, []);
       }
-      this.pendingPromises.get(eventType).push({ resolve, reject, timeoutId });
+      this.pendingPromises.get(eventType).push({ resolve: wrappedResolve, reject, timeoutId });
     });
   }
 
@@ -253,8 +458,8 @@ export class VoiceAgentTester {
       throw new Error('Browser not launched. Call launch() first.');
     }
 
-    // Set the assets server URL in the page context before injecting scripts
-    await this.page.evaluate((url) => {
+    // Set the assets server URL in the page context for every navigation
+    await this.page.evaluateOnNewDocument((url) => {
       window.__assetsServerUrl = url;
     }, this.assetsServerUrl);
 
@@ -269,12 +474,13 @@ export class VoiceAgentTester {
 
     for (const jsFile of jsFiles) {
       try {
-        await this.page.addScriptTag({ path: jsFile });
+        const content = fs.readFileSync(jsFile, 'utf8');
+        await this.page.evaluateOnNewDocument(content);
         if (this.verbose) {
-          console.log(`Injected: ${path.basename(jsFile)}`);
+          console.log(`Configured injection on navigation: ${path.basename(jsFile)}`);
         }
       } catch (error) {
-        console.error(`Error injecting ${jsFile}:`, error.message);
+        console.error(`Error configuring injection for ${jsFile}:`, error.message);
       }
     }
   }
@@ -326,6 +532,7 @@ export class VoiceAgentTester {
         case 'screenshot':
           handlerResult = await this.handleScreenshot(step);
           break;
+
         default:
           console.log(`Unknown action: ${action}`);
       }
@@ -350,7 +557,9 @@ export class VoiceAgentTester {
         }
       }
     } catch (error) {
-      console.error(`Error executing step ${action}:`, error.message);
+      // Only print the first line of error (before diagnostics) to avoid duplication
+      const shortMessage = error.message.split('\n')[0];
+      console.error(`Error executing step ${stepIndex + 1} (${action}): ${shortMessage}`);
       throw error;
     }
   }
@@ -366,20 +575,22 @@ export class VoiceAgentTester {
   }
 
   async handleWaitForVoice() {
-    try {
-      await this.waitForAudioEvent('audiostart');
-    } catch (error) {
-      console.error('Timeout waiting for voice input:', error.message);
-      throw error;
+    if (this.debug) {
+      console.log('\t⏳ Waiting for audio to start (AI agent response)...');
+    }
+    await this.waitForAudioEvent('audiostart');
+    if (this.debug) {
+      console.log('\t✅ Audio detected');
     }
   }
 
   async handleWaitForSilence() {
-    try {
-      await this.waitForAudioEvent('audiostop');
-    } catch (error) {
-      console.error('Timeout waiting for silence:', error.message);
-      throw error;
+    if (this.debug) {
+      console.log('\t⏳ Waiting for audio to stop (silence)...');
+    }
+    await this.waitForAudioEvent('audiostop');
+    if (this.debug) {
+      console.log('\t✅ Silence detected');
     }
   }
 
@@ -413,7 +624,10 @@ export class VoiceAgentTester {
         throw new Error(`Audio file not found: ${file}`);
       }
 
-      const fileUrl = `${this.assetsServerUrl}/assets/${file}`;
+      const fileBuffer = fs.readFileSync(filePath);
+      const base64 = fileBuffer.toString('base64');
+      const mimeType = file.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg';
+      const fileUrl = `data:${mimeType};base64,${base64}`;
 
       await this.page.evaluate(async (url) => {
         if (typeof window.__waitForMediaStream === 'function') {
@@ -737,6 +951,8 @@ export class VoiceAgentTester {
     return screenshotPath;
   }
 
+
+
   async saveAudioAsWAV(base64Audio, audioMetadata) {
     try {
       // Convert base64 to buffer
@@ -775,10 +991,10 @@ export class VoiceAgentTester {
 
       await this.launch(url);
 
-      await this.page.goto(url, { waitUntil: 'load' });
-
-      // Inject JavaScript files after the page has loaded
+      // Inject JavaScript files before loading the page
       await this.injectJavaScriptFiles();
+
+      await this.page.goto(url, { waitUntil: 'load' });
 
       await this.page.waitForNetworkIdle({ timeout: 5000, concurrency: 2 });
 
@@ -801,7 +1017,9 @@ export class VoiceAgentTester {
     } catch (error) {
       // Log the error but still finish the run for report generation
       success = false;
-      console.error('Error during scenario execution:', error);
+      // Only print the first line to avoid duplicating diagnostics
+      const shortMessage = error.message.split('\n')[0];
+      console.error(`Error during scenario execution: ${shortMessage}`);
       throw error;
     } finally {
       // Always finish the run for report generation, even if there was an error
