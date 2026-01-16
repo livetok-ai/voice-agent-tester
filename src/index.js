@@ -201,31 +201,19 @@ const argv = yargs(hideBin(process.argv))
   })
   .option('api-key', {
     type: 'string',
-    description: 'Telnyx API key for authentication'
+    description: 'Telnyx API key for authentication and import operations'
   })
   .option('provider-api-key', {
     type: 'string',
-    description: 'Provider API key (required with --provider)'
+    description: 'External provider API key (required with --provider for import)'
   })
   .option('provider-import-id', {
     type: 'string',
     description: 'Provider assistant/agent ID to import (required with --provider)'
   })
-  .option('share-key', {
-    type: 'string',
-    description: 'Provider share key for vapi.yaml'
-  })
-  .option('agent-id', {
-    type: 'string',
-    description: 'ElevenLabs agent ID for direct benchmarking'
-  })
-  .option('branch-id', {
-    type: 'string',
-    description: 'ElevenLabs branch ID for direct benchmarking'
-  })
   .option('assistant-id', {
     type: 'string',
-    description: 'Telnyx assistant ID for direct benchmarking'
+    description: 'Assistant/agent ID for direct benchmarking (works with all providers)'
   })
   .option('debug', {
     alias: 'd',
@@ -260,25 +248,11 @@ async function main() {
     // Parse URL parameters for template substitution
     const params = parseParams(argv.params);
 
-    // Inject CLI options into params (if not already set via --params)
-    if (argv.shareKey && !params.shareKey) {
-      params.shareKey = argv.shareKey;
-    }
-    if (argv.assistantId && !params.assistantId) {
-      params.assistantId = argv.assistantId;
-    }
-    if (argv.agentId && !params.agentId) {
-      params.agentId = argv.agentId;
-    }
-    if (argv.branchId && !params.branchId) {
-      params.branchId = argv.branchId;
-    }
-
     // Handle provider import if requested
     if (argv.provider) {
       // Validate required options for provider import
       if (!argv.apiKey) {
-        throw new Error('--api-key is required when using --provider');
+        throw new Error('--api-key (Telnyx) is required when using --provider');
       }
       if (!argv.providerApiKey) {
         throw new Error('--provider-api-key is required when using --provider');
@@ -294,18 +268,19 @@ async function main() {
         assistantId: argv.providerImportId
       });
 
-      // Use the imported assistant
+      // Use the imported assistant's Telnyx ID
       const selectedAssistant = importResult.assistants[0];
 
-      // Inject the imported assistant ID into params
+      // Inject the imported assistant ID into params (overrides CLI assistant-id with Telnyx ID)
       if (selectedAssistant) {
         params.assistantId = selectedAssistant.id;
-        console.log(`📝 Injected assistantId from ${argv.provider} import: ${selectedAssistant.id}`);
+        console.log(`📝 Injected Telnyx assistantId from ${argv.provider} import: ${selectedAssistant.id}`);
       }
-    } else if (!argv.assistantId && !argv.agentId) {
-      // If no provider and no assistant-id or agent-id, show error
-      throw new Error('--assistant-id or --agent-id is required when not using --provider');
+    } else if (!argv.assistantId) {
+      throw new Error('--assistant-id is required');
     } else {
+      // Inject assistant-id into params for URL template substitution
+      params.assistantId = argv.assistantId;
       // Direct Telnyx use case - optionally check web calls support if api-key provided
       if (argv.apiKey) {
         console.log(`\n🔍 Checking assistant configuration...`);
