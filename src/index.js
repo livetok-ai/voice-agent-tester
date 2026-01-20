@@ -14,14 +14,25 @@ import { importAssistantsFromProvider, getAssistant, enableWebCalls, SUPPORTED_P
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const __packageDir = path.resolve(__dirname, '..');
 
 // Helper function to resolve file paths from comma-separated input or folder
+// First tries to resolve relative to cwd, then falls back to package directory
 function resolveConfigPaths(input) {
   const paths = [];
   const items = input.split(',').map(s => s.trim());
 
   for (const item of items) {
-    const resolvedPath = path.resolve(item);
+    // Try resolving relative to current working directory first
+    let resolvedPath = path.resolve(item);
+    
+    // If not found in cwd, try resolving relative to package directory
+    if (!fs.existsSync(resolvedPath)) {
+      const packagePath = path.resolve(__packageDir, item);
+      if (fs.existsSync(packagePath)) {
+        resolvedPath = packagePath;
+      }
+    }
 
     if (fs.existsSync(resolvedPath)) {
       const stat = fs.statSync(resolvedPath);
@@ -36,7 +47,7 @@ function resolveConfigPaths(input) {
         paths.push(resolvedPath);
       }
     } else {
-      throw new Error(`Path not found: ${resolvedPath}`);
+      throw new Error(`Path not found: ${item}`);
     }
   }
 
