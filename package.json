@@ -1,6 +1,6 @@
 {
   "name": "@telnyx/voice-agent-tester",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "A command-line tool to test voice agents using Puppeteer",
   "main": "src/index.js",
   "type": "module",

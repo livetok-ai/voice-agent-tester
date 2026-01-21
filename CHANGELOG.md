@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.3](https://github.com/team-telnyx/voice-agent-tester/compare/v0.2.2...v0.2.3) (2026-01-21)
+
+### Features
+
+* resolve cli config files via npm cli usage ([2b12952](https://github.com/team-telnyx/voice-agent-tester/commit/2b1295284f7dff6f2a91df743b69f7905246d97b))
+
 ## [0.2.2](https://github.com/team-telnyx/voice-agent-tester/compare/v0.2.1...v0.2.2) (2026-01-20)
 
 ## [0.2.1](https://github.com/team-telnyx/voice-agent-tester/compare/v0.2.0...v0.2.1) (2026-01-20)
