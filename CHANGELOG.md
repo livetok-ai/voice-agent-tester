@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0](https://github.com/team-telnyx/voice-agent-tester/compare/v0.2.3...v0.3.0) (2026-01-23)
+
+### Features
+
+* add comparison benchmark mode for provider imports ([a6de0f4](https://github.com/team-telnyx/voice-agent-tester/commit/a6de0f43e8cfd469ddfcd031c0c05a002662e30a))
+
 ## [0.2.3](https://github.com/team-telnyx/voice-agent-tester/compare/v0.2.2...v0.2.3) (2026-01-21)
 
 ### Features
