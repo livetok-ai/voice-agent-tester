@@ -3,81 +3,127 @@
 [![CI](https://github.com/team-telnyx/voice-agent-tester/actions/workflows/ci.yml/badge.svg)](https://github.com/team-telnyx/voice-agent-tester/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@telnyx/voice-agent-tester.svg)](https://www.npmjs.com/package/@telnyx/voice-agent-tester)
 
-A CLI tool for automated benchmarking and testing of voice AI agents. Supports Telnyx, ElevenLabs, and Vapi.
-
-This is a [Telnyx](https://telnyx.com) fork of [livetok-ai/voice-agent-tester](https://github.com/livetok-ai/voice-agent-tester). For base documentation (configuration, actions, etc.), see the [original README](https://github.com/livetok-ai/voice-agent-tester#readme).
-
-## Installation
-
-```bash
-npm install -g @telnyx/voice-agent-tester
-```
+A CLI tool for automated benchmarking and testing of voice AI agents. Supports Telnyx, ElevenLabs, Vapi, and Retell.
 
 ## Quick Start
 
+Run directly with npx (no installation required):
+
 ```bash
-voice-agent-tester -a benchmarks/applications/telnyx.yaml -s benchmarks/scenarios/appointment.yaml --assistant-id <YOUR_ASSISTANT_ID>
+npx @telnyx/voice-agent-tester@latest -a applications/telnyx.yaml -s scenarios/appointment.yaml --assistant-id <YOUR_ASSISTANT_ID>
 ```
 
-The CLI includes bundled application and scenario configs that you can use directly.
+Or install globally:
+
+```bash
+npm install -g @telnyx/voice-agent-tester
+voice-agent-tester -a applications/telnyx.yaml -s scenarios/appointment.yaml --assistant-id <YOUR_ASSISTANT_ID>
+```
 
 ## CLI Options
 
-| Option | Description |
-|--------|-------------|
-| `-a, --applications` | Application config path(s) (required) |
-| `-s, --scenarios` | Scenario config path(s) (required) |
-| `--assistant-id` | Telnyx assistant ID |
-| `--agent-id` | ElevenLabs agent ID |
-| `--branch-id` | ElevenLabs branch ID |
-| `--share-key` | Vapi share key |
-| `--api-key` | Telnyx API key |
-| `--provider` | Import from external provider (`vapi`, `elevenlabs`, `retell`) |
-| `--provider-api-key` | External provider API key |
-| `--provider-import-id` | Provider assistant/agent ID to import |
-| `--params` | Additional URL template params |
-| `--debug` | Enable detailed timeout diagnostics |
-| `--headless` | Run browser in headless mode (default: true) |
-| `--repeat` | Number of repetitions |
-| `-v, --verbose` | Show browser console logs |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-a, --applications` | required | Application config path |
+| `-s, --scenarios` | required | Scenario config path |
+| `--assistant-id` | | Telnyx or provider assistant ID |
+| `--api-key` | | Telnyx API key |
+| `--provider` | | Import from provider (`vapi`, `elevenlabs`, `retell`) |
+| `--provider-api-key` | | External provider API key |
+| `--provider-import-id` | | Provider assistant ID to import |
+| `--compare` | `true` | Run both provider direct and Telnyx import benchmarks for comparison |
+| `--no-compare` | `false` | Disable comparison (run only Telnyx import benchmark) |
+| `-d, --debug` | `false` | Enable detailed timeout diagnostics |
+| `--headless` | `true` | Run in headless mode |
+| `--repeat` | `1` | Number of repetitions |
+| `-c, --concurrency` | `1` | Number of parallel tests |
+| `-r, --report` | | Generate CSV report to file |
 
 ## Bundled Configs
 
-The following application configs are included:
+| Application Config | Provider |
+|-------------------|----------|
+| `applications/telnyx.yaml` | Telnyx AI Widget |
+| `applications/elevenlabs.yaml` | ElevenLabs |
+| `applications/vapi.yaml` | Vapi |
+| `applications/retell.yaml` | Retell |
 
-| Config | Provider |
-|--------|----------|
-| `benchmarks/applications/telnyx.yaml` | Telnyx AI Widget |
-| `benchmarks/applications/elevenlabs.yaml` | ElevenLabs |
-| `benchmarks/applications/vapi.yaml` | Vapi |
+Scenario: `scenarios/appointment.yaml`
 
-Scenario configs:
-- `benchmarks/scenarios/appointment.yaml` - Appointment scheduling test
+## Examples
 
-## Usage Examples
-
-### Telnyx Assistant
+### Telnyx
 
 ```bash
-voice-agent-tester -a benchmarks/applications/telnyx.yaml -s benchmarks/scenarios/appointment.yaml --assistant-id <TELNYX_ASSISTANT_ID>
+npx @telnyx/voice-agent-tester@latest \
+  -a applications/telnyx.yaml \
+  -s scenarios/appointment.yaml \
+  --assistant-id <ASSISTANT_ID>
 ```
 
-### ElevenLabs Agent
+### ElevenLabs
 
 ```bash
-voice-agent-tester -a benchmarks/applications/elevenlabs.yaml -s benchmarks/scenarios/appointment.yaml --agent-id <ELEVENLABS_AGENT_ID> --branch-id <BRANCH_ID>
+npx @telnyx/voice-agent-tester@latest \
+  -a applications/elevenlabs.yaml \
+  -s scenarios/appointment.yaml \
+  --assistant-id <AGENT_ID>
 ```
 
-### Vapi Assistant
+### Vapi
 
 ```bash
-voice-agent-tester -a benchmarks/applications/vapi.yaml -s benchmarks/scenarios/appointment.yaml --assistant-id <VAPI_ASSISTANT_ID> --share-key <SHARE_KEY>
+npx @telnyx/voice-agent-tester@latest \
+  -a applications/vapi.yaml \
+  -s scenarios/appointment.yaml \
+  --assistant-id <ASSISTANT_ID>
 ```
 
-### Import from Provider to Telnyx
+## Comparison Mode
+
+When importing from an external provider, the tool automatically runs both benchmarks in sequence and generates a comparison report:
+
+1. **Provider Direct** - Benchmarks the assistant on the original provider's widget
+2. **Telnyx Import** - Benchmarks the same assistant after importing to Telnyx
+
+### Import and Compare (Default)
 
 ```bash
-voice-agent-tester -a benchmarks/applications/telnyx.yaml -s benchmarks/scenarios/appointment.yaml --provider vapi --api-key <TELNYX_API_KEY> --provider-api-key <VAPI_API_KEY> --provider-import-id <VAPI_ASSISTANT_ID>
+npx @telnyx/voice-agent-tester@latest \
+  -a applications/telnyx.yaml \
+  -s scenarios/appointment.yaml \
+  --provider vapi \
+  --api-key <TELNYX_KEY> \
+  --provider-api-key <VAPI_KEY> \
+  --provider-import-id <VAPI_ASSISTANT_ID>
+```
+
+This will:
+- Run Phase 1: VAPI direct benchmark
+- Run Phase 2: Telnyx import benchmark
+- Generate a side-by-side latency comparison report
+
+### Import Only (No Comparison)
+
+To skip the provider direct benchmark and only run the Telnyx import:
+
+```bash
+npx @telnyx/voice-agent-tester@latest \
+  -a applications/telnyx.yaml \
+  -s scenarios/appointment.yaml \
+  --provider vapi \
+  --no-compare \
+  --api-key <TELNYX_KEY> \
+  --provider-api-key <VAPI_KEY> \
+  --provider-import-id <VAPI_ASSISTANT_ID>
+```
+
+### Debugging Failures
+
+If benchmarks fail, rerun with `--debug` for detailed diagnostics:
+
+```bash
+voice-agent-tester --provider vapi --debug [other options...]
 ```
 
 ## License

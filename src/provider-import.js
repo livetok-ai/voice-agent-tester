@@ -155,13 +155,26 @@ export async function enableWebCalls({ assistantId, telnyxApiKey, assistant }) {
 }
 
 /**
+ * Sleep utility for retry delays.
+ * @param {number} ms - Milliseconds to sleep
+ * @returns {Promise<void>}
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
  * Configure an imported assistant with web calls enabled, widget settings, and timestamped name.
  * Returns true if successful, false if failed (with warning).
+ * 
+ * Implements retry logic with exponential backoff to handle 404 errors that may occur
+ * when the assistant was just created and is not yet available due to eventual consistency.
  *
  * @param {Object} options
  * @param {string} options.assistantId - The assistant ID
  * @param {string} options.assistantName - The original assistant name
  * @param {string} options.telnyxApiKey - Telnyx API key for authentication
+ * @param {string} options.provider - The provider name (for naming)
  * @returns {Promise<boolean>}
  */
 async function configureImportedAssistant({ assistantId, assistantName, telnyxApiKey, provider }) {
@@ -173,36 +186,62 @@ async function configureImportedAssistant({ assistantId, assistantName, telnyxAp
   console.log(`🔧 Configuring assistant: ${assistantId}`);
   console.log(`   📝 Renaming to: ${newName}`);
 
-  try {
-    const response = await fetch(`${TELNYX_ASSISTANTS_ENDPOINT}/${assistantId}`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${telnyxApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        name: newName,
-        model: 'Qwen/Qwen3-235B-A22',
-        telephony_settings: {
-          supports_unauthenticated_web_calls: true
+  // Retry configuration for handling 404 on recently created assistants
+  const MAX_RETRIES = 5;
+  const INITIAL_DELAY_MS = 500;
+  
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(`${TELNYX_ASSISTANTS_ENDPOINT}/${assistantId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${telnyxApiKey}`,
+          'Content-Type': 'application/json'
         },
-        widget_settings: DEFAULT_WIDGET_SETTINGS
-      })
-    });
+        body: JSON.stringify({
+          name: newName,
+          model: 'Qwen/Qwen3-235B-A22',
+          telephony_settings: {
+            supports_unauthenticated_web_calls: true
+          },
+          widget_settings: DEFAULT_WIDGET_SETTINGS
+        })
+      });
 
-    if (!response.ok) {
+      if (response.ok) {
+        console.log(`✅ Assistant configured: ${newName}`);
+        return true;
+      }
+
+      // Handle 404 with retry for recently created assistants
+      if (response.status === 404 && attempt < MAX_RETRIES) {
+        const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1); // Exponential backoff: 500, 1000, 2000, 4000ms
+        console.log(`   ⏳ Assistant not yet available (404), retrying in ${delay}ms... (attempt ${attempt}/${MAX_RETRIES})`);
+        await sleep(delay);
+        continue;
+      }
+
+      // Non-retryable error or max retries exceeded
       const errorText = await response.text();
       console.warn(`⚠️  Could not configure assistant ${assistantId}: ${response.status}`);
+      if (response.status === 404) {
+        console.warn(`   Assistant not found after ${MAX_RETRIES} retries. It may take longer to propagate.`);
+      }
       console.warn(`   This may require manual configuration in the Telnyx portal.`);
       return false;
+    } catch (error) {
+      if (attempt < MAX_RETRIES) {
+        const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+        console.log(`   ⏳ Network error, retrying in ${delay}ms... (attempt ${attempt}/${MAX_RETRIES})`);
+        await sleep(delay);
+        continue;
+      }
+      console.warn(`⚠️  Error configuring assistant ${assistantId}: ${error.message}`);
+      return false;
     }
-
-    console.log(`✅ Assistant configured: ${newName}`);
-    return true;
-  } catch (error) {
-    console.warn(`⚠️  Error configuring assistant ${assistantId}: ${error.message}`);
-    return false;
   }
+  
+  return false;
 }
 
 /**
