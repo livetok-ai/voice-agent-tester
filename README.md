@@ -24,20 +24,26 @@ voice-agent-tester -a applications/telnyx.yaml -s scenarios/appointment.yaml --a
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-a, --applications` | required | Application config path |
-| `-s, --scenarios` | required | Scenario config path |
+| `-a, --applications` | required | Application config path(s) or folder |
+| `-s, --scenarios` | required | Scenario config path(s) or folder |
 | `--assistant-id` | | Telnyx or provider assistant ID |
-| `--api-key` | | Telnyx API key |
+| `--api-key` | | Telnyx API key for authentication |
 | `--provider` | | Import from provider (`vapi`, `elevenlabs`, `retell`) |
-| `--provider-api-key` | | External provider API key |
-| `--provider-import-id` | | Provider assistant ID to import |
-| `--compare` | `true` | Run both provider direct and Telnyx import benchmarks for comparison |
-| `--no-compare` | `false` | Disable comparison (run only Telnyx import benchmark) |
+| `--provider-api-key` | | External provider API key (required with `--provider`) |
+| `--provider-import-id` | | Provider assistant ID to import (required with `--provider`) |
+| `--compare` | `true` | Run both provider direct and Telnyx import benchmarks |
+| `--no-compare` | | Disable comparison (run only Telnyx import) |
 | `-d, --debug` | `false` | Enable detailed timeout diagnostics |
-| `--headless` | `true` | Run in headless mode |
-| `--repeat` | `1` | Number of repetitions |
+| `-v, --verbose` | `false` | Show browser console logs |
+| `--headless` | `true` | Run browser in headless mode |
+| `--repeat` | `1` | Number of repetitions per combination |
 | `-c, --concurrency` | `1` | Number of parallel tests |
-| `-r, --report` | | Generate CSV report to file |
+| `-r, --report` | | Generate CSV report to specified file |
+| `-p, --params` | | URL template params (e.g., `key=value,key2=value2`) |
+| `--record` | `false` | Record video and audio in webm format |
+| `--application-tags` | | Filter applications by comma-separated tags |
+| `--scenario-tags` | | Filter scenarios by comma-separated tags |
+| `--assets-server` | `http://localhost:3333` | Assets server URL |
 
 ## Bundled Configs
 
@@ -47,6 +53,7 @@ voice-agent-tester -a applications/telnyx.yaml -s scenarios/appointment.yaml --a
 | `applications/elevenlabs.yaml` | ElevenLabs |
 | `applications/vapi.yaml` | Vapi |
 | `applications/retell.yaml` | Retell |
+| `applications/livetok.yaml` | Livetok |
 
 Scenario: `scenarios/appointment.yaml`
 
