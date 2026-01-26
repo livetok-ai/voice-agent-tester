@@ -951,8 +951,6 @@ export class VoiceAgentTester {
     return screenshotPath;
   }
 
-
-
   async saveAudioAsWAV(base64Audio, audioMetadata) {
     try {
       // Convert base64 to buffer
@@ -978,7 +976,7 @@ export class VoiceAgentTester {
     }
   }
 
-  async runScenario(url, appSteps, scenarioSteps, appName = '', scenarioName = '', repetition = 1, backgroundFile = null) {
+  async runScenario(url, appSteps, scenarioSteps, appName = '', scenarioName = '', repetition = 1) {
     let success = true;
     try {
       // Start tracking this run with app and scenario names

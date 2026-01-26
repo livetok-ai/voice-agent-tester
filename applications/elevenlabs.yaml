@@ -1,10 +1,13 @@
 url: "https://elevenlabs.io/app/talk-to?agent_id={{assistantId}}&branch_id={{branchId}}"
+tags:
+  - provider
+  - elevenlabs
 steps:
   - action: wait_for_element
-    selector: "button[data-agent-id]"
+    selector: "text=Call AI agent"
   - action: sleep
     time: 3000
   - action: click
-    selector: "button[data-agent-id]"
+    selector: "text=Call AI agent"
   - action: sleep
     time: 2000

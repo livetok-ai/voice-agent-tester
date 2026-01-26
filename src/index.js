@@ -118,7 +118,6 @@ function loadScenarioConfig(configPath) {
     name: path.basename(configPath, path.extname(configPath)),
     path: configPath,
     steps: config.steps || [],
-    background: config.background || null,
     tags: config.tags || []
   };
 }
@@ -337,7 +336,7 @@ async function runBenchmark({ applications, scenarios, repeat, concurrency, argv
     });
 
     try {
-      await tester.runScenario(targetUrl, app.steps, scenario.steps, app.name, scenario.name, repetition, scenario.background);
+      await tester.runScenario(targetUrl, app.steps, scenario.steps, app.name, scenario.name, repetition);
       console.log(`✅ Completed successfully (Run ${runNumber}/${totalRuns})`);
       return { success: true };
     } catch (error) {

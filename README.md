@@ -55,7 +55,84 @@ voice-agent-tester -a applications/telnyx.yaml -s scenarios/appointment.yaml --a
 | `applications/retell.yaml` | Retell |
 | `applications/livetok.yaml` | Livetok |
 
-Scenario: `scenarios/appointment.yaml`
+Scenarios:
+- `scenarios/appointment.yaml` - Basic appointment booking test
+- `scenarios/appointment_with_noise.yaml` - Appointment with background noise (pre-mixed audio)
+
+## Background Noise Testing
+
+Test voice agents' performance with ambient noise (e.g., crowd chatter, cafe environment). Background noise is pre-mixed into audio files to simulate real-world conditions where users speak to voice agents in noisy environments.
+
+### Running with Background Noise
+
+```bash
+# Telnyx with background noise
+npx @telnyx/voice-agent-tester@latest \
+  -a applications/telnyx.yaml \
+  -s scenarios/appointment_with_noise.yaml \
+  --assistant-id <YOUR_ASSISTANT_ID>
+
+# Compare with no noise (same assistant)
+npx @telnyx/voice-agent-tester@latest \
+  -a applications/telnyx.yaml \
+  -s scenarios/appointment.yaml \
+  --assistant-id <YOUR_ASSISTANT_ID>
+
+# Generate CSV report with metrics
+npx @telnyx/voice-agent-tester@latest \
+  -a applications/telnyx.yaml \
+  -s scenarios/appointment_with_noise.yaml \
+  --assistant-id <YOUR_ASSISTANT_ID> \
+  -r output/noise_benchmark.csv
+```
+
+### Bundled Audio Files
+
+| File | Description |
+|------|-------------|
+| `hello_make_an_appointment.mp3` | Clean appointment request |
+| `hello_make_an_appointment_with_noise.mp3` | Appointment request with crowd noise |
+| `appointment_data.mp3` | Clean appointment details |
+| `appointment_data_with_noise.mp3` | Appointment details with crowd noise |
+
+### Scenario Configuration
+
+The noise scenario uses pre-mixed audio files:
+
+```yaml
+# scenarios/appointment_with_noise.yaml
+tags:
+  - default
+  - noise
+steps:
+  - action: wait_for_voice
+  - action: wait_for_silence
+  - action: sleep
+    time: 1000
+  - action: speak
+    file: hello_make_an_appointment_with_noise.mp3
+  - action: wait_for_voice
+    metrics: elapsed_time
+  - action: wait_for_silence
+  - action: speak
+    file: appointment_data_with_noise.mp3
+  - action: wait_for_voice
+    metrics: elapsed_time
+```
+
+### Metrics and Reports
+
+The benchmark collects response latency metrics at each `wait_for_voice` step with `metrics: elapsed_time`. Generated CSV reports include:
+
+```csv
+app, scenario, repetition, success, duration, step_9_wait_for_voice_elapsed_time, step_12_wait_for_voice_elapsed_time
+telnyx, appointment_with_noise, 0, 1, 29654, 1631, 1225
+```
+
+Compare results with and without noise to measure how background noise affects your voice agent's:
+- Response latency
+- Speech recognition accuracy
+- Overall conversation flow
 
 ## Examples
 

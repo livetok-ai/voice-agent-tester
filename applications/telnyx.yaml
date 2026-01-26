@@ -5,6 +5,6 @@ steps:
   - action: sleep
     time: 3000
   - action: click
-    selector: "telnyx-ai-agent"
+    selector: "telnyx-ai-agent >>> button"
   - action: sleep
     time: 4000

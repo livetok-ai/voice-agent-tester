@@ -288,4 +288,3 @@ window.__waitForMediaStream = function (timeout = 10000) {
     mediaStreamWaiters.push(onStreamReady);
   });
 };
-
