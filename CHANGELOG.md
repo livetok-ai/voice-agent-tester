@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/team-telnyx/voice-agent-tester/compare/v0.3.0...v0.4.0) (2026-01-26)
+
+### Features
+
+* add audio input from URL for benchmark runs ([c347de8](https://github.com/team-telnyx/voice-agent-tester/commit/c347de83b8318827bac098bff4328502908ee981))
+* add background noise benchmark with pre-mixed audio files ([9f64179](https://github.com/team-telnyx/voice-agent-tester/commit/9f6417936514451270c4d1bc929771446c366b08))
+
 ## [0.3.0](https://github.com/team-telnyx/voice-agent-tester/compare/v0.2.3...v0.3.0) (2026-01-23)
 
 ### Features
