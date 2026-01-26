@@ -288,3 +288,108 @@ window.__waitForMediaStream = function (timeout = 10000) {
     mediaStreamWaiters.push(onStreamReady);
   });
 };
+
+// ============= AUDIO INPUT FROM URL =============
+// For playing audio from a URL as input during the entire benchmark
+
+let urlAudioElement = null;
+let urlAudioSourceNode = null;
+let urlAudioGainNode = null;
+
+// Start playing audio from URL (sent as microphone input)
+window.__startAudioFromUrl = function (url, volume = 1.0) {
+  console.log(`🔊 Starting audio from URL: ${url} (volume: ${volume})`);
+
+  if (!globalAudioContext) {
+    console.error('AudioContext not initialized');
+    return Promise.reject(new Error('AudioContext not initialized'));
+  }
+
+  // Stop any existing URL audio
+  window.__stopAudioFromUrl();
+
+  return new Promise((resolve, reject) => {
+    urlAudioElement = new Audio(url);
+    urlAudioElement.crossOrigin = 'anonymous';
+    urlAudioElement.loop = true;
+
+    urlAudioElement.addEventListener('canplaythrough', function onCanPlay() {
+      urlAudioElement.removeEventListener('canplaythrough', onCanPlay);
+
+      try {
+        // Create media element source
+        urlAudioSourceNode = globalAudioContext.createMediaElementSource(urlAudioElement);
+
+        // Create gain node for volume control
+        urlAudioGainNode = globalAudioContext.createGain();
+        urlAudioGainNode.gain.setValueAtTime(volume, globalAudioContext.currentTime);
+
+        // Connect: source -> gain -> all MediaStreams
+        urlAudioSourceNode.connect(urlAudioGainNode);
+
+        // Connect to all MediaStream gain nodes (sent as microphone input)
+        mediaStreams.forEach((streamData) => {
+          urlAudioGainNode.connect(streamData.gainNode);
+          console.log(`🔊 Connected URL audio to stream ${streamData.id}`);
+        });
+
+        // Also make audible through speakers if speak audio is audible
+        if (MAKE_SPEAK_AUDIO_AUDIBLE) {
+          urlAudioGainNode.connect(globalAudioContext.destination);
+        }
+
+        // Start playing
+        urlAudioElement.play().then(() => {
+          console.log('🔊 Audio from URL started playing');
+          if (typeof __publishEvent === 'function') {
+            __publishEvent('urlaudiostart', { url: url, volume: volume });
+          }
+          resolve();
+        }).catch(reject);
+
+      } catch (error) {
+        console.error('Error setting up audio from URL:', error);
+        reject(error);
+      }
+    });
+
+    urlAudioElement.addEventListener('error', function (event) {
+      console.error('URL audio error:', event);
+      reject(new Error('Failed to load audio from URL'));
+    });
+
+    urlAudioElement.load();
+  });
+};
+
+// Stop audio from URL
+window.__stopAudioFromUrl = function () {
+  if (urlAudioElement) {
+    console.log('🔊 Stopping audio from URL');
+    urlAudioElement.pause();
+    urlAudioElement.currentTime = 0;
+    urlAudioElement = null;
+  }
+
+  if (urlAudioSourceNode) {
+    try {
+      urlAudioSourceNode.disconnect();
+    } catch (e) {
+      // Already disconnected
+    }
+    urlAudioSourceNode = null;
+  }
+
+  if (urlAudioGainNode) {
+    try {
+      urlAudioGainNode.disconnect();
+    } catch (e) {
+      // Already disconnected
+    }
+    urlAudioGainNode = null;
+  }
+
+  if (typeof __publishEvent === 'function') {
+    __publishEvent('urlaudiostop', {});
+  }
+};

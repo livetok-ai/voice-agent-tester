@@ -40,10 +40,11 @@ voice-agent-tester -a applications/telnyx.yaml -s scenarios/appointment.yaml --a
 | `-c, --concurrency` | `1` | Number of parallel tests |
 | `-r, --report` | | Generate CSV report to specified file |
 | `-p, --params` | | URL template params (e.g., `key=value,key2=value2`) |
-| `--record` | `false` | Record video and audio in webm format |
 | `--application-tags` | | Filter applications by comma-separated tags |
 | `--scenario-tags` | | Filter scenarios by comma-separated tags |
 | `--assets-server` | `http://localhost:3333` | Assets server URL |
+| `--audio-url` | | URL to audio file to play as input during entire benchmark |
+| `--audio-volume` | `1.0` | Volume level for audio input (0.0 to 1.0) |
 
 ## Bundled Configs
 
@@ -85,6 +86,25 @@ npx @telnyx/voice-agent-tester@latest \
   --assistant-id <YOUR_ASSISTANT_ID> \
   -r output/noise_benchmark.csv
 ```
+
+### Custom Audio Input from URL
+
+Play any audio file from a URL as input throughout the entire benchmark run. The audio is sent to the voice agent as microphone input.
+
+```bash
+# Use custom audio input from URL
+npx @telnyx/voice-agent-tester@latest \
+  -a applications/telnyx.yaml \
+  -s scenarios/appointment.yaml \
+  --assistant-id <YOUR_ASSISTANT_ID> \
+  --audio-url "https://example.com/test-audio.mp3" \
+  --audio-volume 0.8
+```
+
+This is useful for:
+- Testing with custom audio inputs
+- Using longer audio tracks that play throughout the benchmark
+- A/B testing different audio sources
 
 ### Bundled Audio Files
 

@@ -24,6 +24,8 @@ export class VoiceAgentTester {
     this.record = options.record || false;
     this.recordingStream = null;
     this.recordingFile = null;
+    this.audioUrl = options.audioUrl || null;
+    this.audioVolume = options.audioVolume || 1.0;
   }
 
   sleep(time) {
@@ -976,6 +978,42 @@ export class VoiceAgentTester {
     }
   }
 
+  async startAudioFromUrl(audioUrl, volume = 1.0) {
+    console.log(`🔊 Starting audio from URL: ${audioUrl} (volume: ${volume})`);
+
+    try {
+      await this.page.evaluate(async (url, vol) => {
+        // Wait for media stream to be ready
+        if (typeof window.__waitForMediaStream === 'function') {
+          await window.__waitForMediaStream();
+        }
+
+        if (typeof window.__startAudioFromUrl === 'function') {
+          await window.__startAudioFromUrl(url, vol);
+        } else {
+          throw new Error('__startAudioFromUrl not available in browser context');
+        }
+      }, audioUrl, volume);
+
+      console.log(`🔊 Audio from URL started successfully`);
+    } catch (error) {
+      console.warn(`⚠️ Failed to start audio from URL: ${error.message}`);
+    }
+  }
+
+  async stopAudioFromUrl() {
+    try {
+      await this.page.evaluate(() => {
+        if (typeof window.__stopAudioFromUrl === 'function') {
+          window.__stopAudioFromUrl();
+        }
+      });
+      console.log(`🔊 Audio from URL stopped`);
+    } catch (error) {
+      // Ignore errors when stopping (page might be closed)
+    }
+  }
+
   async runScenario(url, appSteps, scenarioSteps, appName = '', scenarioName = '', repetition = 1) {
     let success = true;
     try {
@@ -1002,6 +1040,11 @@ export class VoiceAgentTester {
       // Start recording if enabled
       await this.startRecording(appName, scenarioName, repetition);
 
+      // Start audio from URL if specified via CLI
+      if (this.audioUrl) {
+        await this.startAudioFromUrl(this.audioUrl, this.audioVolume);
+      }
+
       // Execute all configured steps
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
@@ -1020,6 +1063,15 @@ export class VoiceAgentTester {
       console.error(`Error during scenario execution: ${shortMessage}`);
       throw error;
     } finally {
+      // Stop audio from URL if it was started
+      if (this.audioUrl && this.page) {
+        try {
+          await this.stopAudioFromUrl();
+        } catch (e) {
+          // Page might already be closed
+        }
+      }
+
       // Always finish the run for report generation, even if there was an error
       if (this.reportGenerator) {
         this.reportGenerator.endRun(appName, scenarioName, repetition, success);

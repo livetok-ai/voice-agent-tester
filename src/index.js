@@ -255,6 +255,16 @@ const argv = yargs(hideBin(process.argv))
     description: 'Disable comparison benchmarks (run only Telnyx import)',
     default: false
   })
+  .option('audio-url', {
+    type: 'string',
+    description: 'URL to audio file to play as input during entire benchmark run',
+    default: null
+  })
+  .option('audio-volume', {
+    type: 'number',
+    description: 'Volume level for audio input (0.0 to 1.0)',
+    default: 1.0
+  })
   .help()
   .argv;
 
@@ -332,7 +342,9 @@ async function runBenchmark({ applications, scenarios, repeat, concurrency, argv
       assetsServerUrl: argv.assetsServer,
       reportGenerator: reportGenerator,
       record: argv.record,
-      debug: argv.debug
+      debug: argv.debug,
+      audioUrl: argv.audioUrl,
+      audioVolume: argv.audioVolume
     });
 
     try {
