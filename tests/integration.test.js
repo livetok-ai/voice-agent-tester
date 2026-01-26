@@ -43,6 +43,18 @@ describe('Integration Tests', () => {
             window.SpeechSynthesisUtterance = function(text) {
               this.text = text;
             };
+
+            // Mock __speak function that will be called by the tester
+            // This needs to be in the page itself since evaluateOnNewDocument runs before navigation
+            window.__speak = (text) => {
+              document.getElementById('speech-output').textContent = text;
+              // Signal speech end after a small delay to allow waitForAudioEvent to be set up
+              setTimeout(() => {
+                if (window.__publishEvent) {
+                  window.__publishEvent('speechend', {});
+                }
+              }, 10);
+            };
           </script>
         </body>
       </html>
@@ -58,24 +70,6 @@ describe('Integration Tests', () => {
     const scenarioSteps = [
       { action: 'speak', text: 'Hello, this is a test.' }
     ];
-
-    // Mock __speak to handle speak action - need to inject after page navigation
-    const originalInjectJS = tester.injectJavaScriptFiles.bind(tester);
-    tester.injectJavaScriptFiles = async () => {
-      await originalInjectJS();
-      // Mock __speak after JS files are injected
-      await tester.page.evaluate(() => {
-        window.__speak = (text) => {
-          document.getElementById('speech-output').textContent = text;
-          // Signal speech end after a small delay to allow waitForAudioEvent to be set up
-          setTimeout(() => {
-            if (window.__publishEvent) {
-              window.__publishEvent('speechend', {});
-            }
-          }, 10);
-        };
-      });
-    };
 
     await tester.runScenario(testUrl, appSteps, scenarioSteps, 'test-app', 'test-scenario', 1);
 
