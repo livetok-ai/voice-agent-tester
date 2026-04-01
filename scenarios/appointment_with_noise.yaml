@@ -1,0 +1,17 @@
+tags:
+  - default
+  - noise
+steps:
+  - action: wait_for_voice
+  - action: wait_for_silence
+  - action: sleep
+    time: 1000
+  - action: speak
+    file: hello_make_an_appointment_with_noise.mp3
+  - action: wait_for_voice
+    metrics: elapsed_time
+  - action: wait_for_silence
+  - action: speak
+    file: appointment_data_with_noise.mp3
+  - action: wait_for_voice
+    metrics: elapsed_time

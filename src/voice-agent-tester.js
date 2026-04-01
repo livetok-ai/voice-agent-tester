@@ -5,7 +5,7 @@ import { glob } from 'glob';
 import puppeteer from 'puppeteer';
 import { launch as launchWithStream, getStream, wss } from 'puppeteer-stream';
 import { getInstalledBrowsers } from '@puppeteer/browsers';
-import { transcribeAudio, evaluateTranscription, pcmToWav } from './transcription.js';
+import { pcmToWav } from './transcription.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,6 +14,7 @@ export class VoiceAgentTester {
   constructor(options = {}) {
     this.verbose = options.verbose || false;
     this.headless = options.headless || false;
+    this.debug = options.debug || false;
     this.browser = null;
     this.page = null;
     this.pendingPromises = new Map(); // Map of eventType -> Array of {resolve, reject, timeoutId}
@@ -23,6 +24,8 @@ export class VoiceAgentTester {
     this.record = options.record || false;
     this.recordingStream = null;
     this.recordingFile = null;
+    this.audioUrl = options.audioUrl || null;
+    this.audioVolume = options.audioVolume || 1.0;
   }
 
   sleep(time) {
@@ -31,8 +34,106 @@ export class VoiceAgentTester {
 
   waitForAudioEvent(eventType, timeout = 30000) {
     return new Promise((resolve, reject) => {
+      let diagnosticIntervalId = null;
+      
+      // Helper function to collect diagnostics (only used when debug is enabled)
+      const collectDiagnostics = async () => {
+        if (!this.debug) return null;
+        
+        try {
+          if (this.page) {
+            // Collect audio diagnostics
+            const audioInfo = await this.page.evaluate(() => {
+              const info = {
+                audioMonitorAvailable: typeof window.audioMonitor !== 'undefined',
+                audioDiagnosticsAvailable: typeof window.__getAudioDiagnostics === 'function',
+                rtpStatsAvailable: typeof window.__getRtpStats === 'function',
+                monitoredElementsCount: 0,
+                monitoredElements: [],
+                mediaStreamsInfo: null,
+                audioContextState: null,
+                timestamp: Date.now()
+              };
+
+              // Use detailed diagnostics function if available
+              if (typeof window.__getAudioDiagnostics === 'function') {
+                const detailed = window.__getAudioDiagnostics();
+                info.monitoredElementsCount = detailed.monitoredElementsCount;
+                info.audioContextState = detailed.audioContextState;
+                info.monitoredElements = detailed.elements;
+              } else if (window.audioMonitor && window.audioMonitor.monitoredElements) {
+                // Fallback to basic info
+                info.monitoredElementsCount = window.audioMonitor.monitoredElements.size;
+                window.audioMonitor.monitoredElements.forEach((data, elementId) => {
+                  info.monitoredElements.push({
+                    elementId,
+                    isPlaying: data.isPlaying,
+                    lastAudioTime: data.lastAudioTime,
+                    silenceThreshold: data.silenceThreshold,
+                    isProgrammatic: data.isProgrammatic || false,
+                    timeSinceLastAudio: data.lastAudioTime ? Date.now() - data.lastAudioTime : null
+                  });
+                });
+              }
+
+              if (typeof window.__getMediaStreamInfo === 'function') {
+                info.mediaStreamsInfo = window.__getMediaStreamInfo();
+              }
+
+              return info;
+            });
+
+            // Collect RTP stats separately (async function in browser)
+            let rtpStats = null;
+            try {
+              rtpStats = await this.page.evaluate(async () => {
+                if (typeof window.__getRtpStats === 'function') {
+                  return await window.__getRtpStats();
+                }
+                return null;
+              });
+            } catch (rtpError) {
+              // RTP stats collection failed, continue without them
+            }
+
+            return {
+              ...audioInfo,
+              rtpStats
+            };
+          }
+        } catch (diagError) {
+          console.error('Failed to collect diagnostics:', diagError.message);
+        }
+        return null;
+      };
+
+      // Start periodic diagnostic logging (every 10 seconds) - only when debug is enabled
+      const startTime = Date.now();
+      if (this.debug) {
+        diagnosticIntervalId = setInterval(async () => {
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          const diagnostics = await collectDiagnostics();
+          
+          if (diagnostics) {
+            const elementsInfo = diagnostics.monitoredElements.length > 0
+              ? diagnostics.monitoredElements.map(e => 
+                  `${e.elementId}(playing=${e.isPlaying})`
+                ).join(', ')
+              : 'none';
+            console.log(`\t⏱️ Still waiting for '${eventType}'... [${elapsed}s elapsed, monitored: ${diagnostics.monitoredElementsCount}, elements: ${elementsInfo}]`);
+          } else {
+            console.log(`\t⏱️ Still waiting for '${eventType}'... [${elapsed}s elapsed]`);
+          }
+        }, 10000);
+      }
+
       // Set up timeout
-      const timeoutId = setTimeout(() => {
+      const timeoutId = setTimeout(async () => {
+        // Clear diagnostic interval
+        if (diagnosticIntervalId) {
+          clearInterval(diagnosticIntervalId);
+        }
+
         // Remove this promise from pending list
         const promises = this.pendingPromises.get(eventType) || [];
         const index = promises.findIndex(p => p.resolve === resolve);
@@ -42,14 +143,121 @@ export class VoiceAgentTester {
             this.pendingPromises.delete(eventType);
           }
         }
-        reject(new Error(`Timeout waiting for ${eventType} event after ${timeout}ms`));
+
+        // Build error message - detailed only when debug is enabled
+        let errorMessage = `Timeout waiting for '${eventType}' event after ${timeout}ms`;
+        
+        if (this.debug) {
+          // Collect browser-side diagnostics before rejecting
+          const diagnostics = await collectDiagnostics();
+          
+          if (diagnostics) {
+            errorMessage += '\n\n📊 Audio Monitor Diagnostics:';
+            errorMessage += `\n  - Audio monitor available: ${diagnostics.audioMonitorAvailable}`;
+            if (diagnostics.audioContextState) {
+              errorMessage += `\n  - AudioContext state: ${diagnostics.audioContextState}`;
+            }
+            errorMessage += `\n  - Monitored elements count: ${diagnostics.monitoredElementsCount}`;
+            
+            if (diagnostics.monitoredElements.length > 0) {
+              errorMessage += '\n  - Monitored elements:';
+              for (const elem of diagnostics.monitoredElements) {
+                errorMessage += `\n    • ${elem.elementId}:`;
+                errorMessage += `\n        isPlaying=${elem.isPlaying}, isProgrammatic=${elem.isProgrammatic}`;
+                
+                // Include audio level info if available
+                if (elem.currentAudioLevel !== undefined) {
+                  errorMessage += `\n        audioLevel=${elem.currentAudioLevel} (threshold=${elem.silenceThreshold})`;
+                  if (elem.wouldTriggerAudioStart !== undefined) {
+                    errorMessage += `, wouldTrigger=${elem.wouldTriggerAudioStart}`;
+                  }
+                }
+                
+                if (elem.timeSinceLastAudio !== null) {
+                  errorMessage += `\n        lastAudioAge=${elem.timeSinceLastAudio}ms`;
+                }
+              }
+            } else {
+              errorMessage += '\n  ⚠️ No audio elements are being monitored. This may indicate:';
+              errorMessage += '\n    • The page has not created an audio element yet';
+              errorMessage += '\n    • The audio element does not have a valid srcObject/src';
+              errorMessage += '\n    • The audio hooks were not properly injected';
+            }
+            
+            if (diagnostics.mediaStreamsInfo) {
+              errorMessage += `\n  - Media streams (input): ${diagnostics.mediaStreamsInfo.totalStreams} stream(s)`;
+            }
+
+            // Add RTP stats if available
+            if (diagnostics.rtpStats) {
+              errorMessage += '\n\n📡 WebRTC/RTP Stats:';
+              errorMessage += `\n  - Active connections: ${diagnostics.rtpStats.connectionCount}`;
+              
+              if (diagnostics.rtpStats.connections && diagnostics.rtpStats.connections.length > 0) {
+                diagnostics.rtpStats.connections.forEach((conn, idx) => {
+                  errorMessage += `\n  - Connection ${idx + 1}:`;
+                  errorMessage += `\n      state=${conn.connectionState}, ice=${conn.iceConnectionState}`;
+                  
+                  if (conn.inboundAudio && conn.inboundAudio.length > 0) {
+                    conn.inboundAudio.forEach((audio, audioIdx) => {
+                      errorMessage += `\n      Inbound Audio ${audioIdx + 1}:`;
+                      errorMessage += `\n        packets: received=${audio.packetsReceived}, lost=${audio.packetsLost}`;
+                      errorMessage += `\n        bytes: ${audio.bytesReceived}`;
+                      if (audio.jitter !== undefined) {
+                        errorMessage += `, jitter=${audio.jitter.toFixed(4)}s`;
+                      }
+                      if (audio.audioLevel !== undefined) {
+                        errorMessage += `\n        audioLevel=${audio.audioLevel.toFixed(4)}`;
+                      }
+                      if (audio.concealedSamples !== undefined) {
+                        errorMessage += `\n        concealed=${audio.concealedSamples}, silentConcealed=${audio.silentConcealedSamples}`;
+                      }
+                    });
+                  } else {
+                    errorMessage += '\n      ⚠️ No inbound audio streams';
+                  }
+                  
+                  if (conn.outboundAudio && conn.outboundAudio.length > 0) {
+                    conn.outboundAudio.forEach((audio, audioIdx) => {
+                      errorMessage += `\n      Outbound Audio ${audioIdx + 1}:`;
+                      errorMessage += `\n        packets: sent=${audio.packetsSent}, bytes=${audio.bytesSent}`;
+                    });
+                  }
+                  
+                  if (conn.candidatePairs && conn.candidatePairs.length > 0) {
+                    const pair = conn.candidatePairs[0];
+                    if (pair.currentRoundTripTime !== undefined) {
+                      errorMessage += `\n      RTT: ${(pair.currentRoundTripTime * 1000).toFixed(1)}ms`;
+                    }
+                  }
+                });
+              } else if (diagnostics.rtpStats.connectionCount === 0) {
+                errorMessage += '\n  ⚠️ No WebRTC connections established';
+              }
+            }
+          } else {
+            errorMessage += '\n  (Could not collect browser diagnostics)';
+          }
+
+        }
+
+        reject(new Error(errorMessage));
       }, timeout);
+
+      // Store reference to clear interval on resolve
+      const originalResolve = resolve;
+      const wrappedResolve = (value) => {
+        if (diagnosticIntervalId) {
+          clearInterval(diagnosticIntervalId);
+        }
+        originalResolve(value);
+      };
 
       // Register this promise to be resolved when event arrives
       if (!this.pendingPromises.has(eventType)) {
         this.pendingPromises.set(eventType, []);
       }
-      this.pendingPromises.get(eventType).push({ resolve, reject, timeoutId });
+      this.pendingPromises.get(eventType).push({ resolve: wrappedResolve, reject, timeoutId });
     });
   }
 
@@ -123,7 +331,8 @@ export class VoiceAgentTester {
     await this.page.exposeFunction('__publishEvent', (eventType, data) => {
       const event = { eventType, data, timestamp: Date.now() };
 
-      console.log(`\t📢 Event received: ${eventType}`);
+      const elementSuffix = data && data.elementId ? ` (audio element: ${data.elementId})` : '';
+      console.log(`\t📢 ${eventType}${elementSuffix}`);
 
       // Check if there are any pending promises waiting for this event type
       const pendingPromises = this.pendingPromises.get(eventType);
@@ -155,6 +364,7 @@ export class VoiceAgentTester {
         console.error(error.stack);
       }
     });
+
   }
 
   async close() {
@@ -253,8 +463,8 @@ export class VoiceAgentTester {
       throw new Error('Browser not launched. Call launch() first.');
     }
 
-    // Set the assets server URL in the page context before injecting scripts
-    await this.page.evaluate((url) => {
+    // Set the assets server URL in the page context for every navigation
+    await this.page.evaluateOnNewDocument((url) => {
       window.__assetsServerUrl = url;
     }, this.assetsServerUrl);
 
@@ -269,17 +479,18 @@ export class VoiceAgentTester {
 
     for (const jsFile of jsFiles) {
       try {
-        await this.page.addScriptTag({ path: jsFile });
+        const content = fs.readFileSync(jsFile, 'utf8');
+        await this.page.evaluateOnNewDocument(content);
         if (this.verbose) {
-          console.log(`Injected: ${path.basename(jsFile)}`);
+          console.log(`Configured injection on navigation: ${path.basename(jsFile)}`);
         }
       } catch (error) {
-        console.error(`Error injecting ${jsFile}:`, error.message);
+        console.error(`Error configuring injection for ${jsFile}:`, error.message);
       }
     }
   }
 
-  async executeStep(step, stepIndex, appName = '', scenarioName = '', repetition = 1) {
+  async executeStep(step, stepIndex, appName = '', scenarioName = '', repetition = 1, scenarioStepIndex = null) {
     if (!this.page) {
       throw new Error('Browser not launched. Call launch() first.');
     }
@@ -326,6 +537,10 @@ export class VoiceAgentTester {
         case 'screenshot':
           handlerResult = await this.handleScreenshot(step);
           break;
+        case 'click_with_retry':
+          handlerResult = await this.handleClickWithRetry(step);
+          break;
+
         default:
           console.log(`Unknown action: ${action}`);
       }
@@ -338,19 +553,21 @@ export class VoiceAgentTester {
       // Record metrics for report if enabled and step has metrics attribute
       if (this.reportGenerator && step.metrics) {
         if (step.metrics.includes('elapsed_time')) {
-          this.reportGenerator.recordStepMetric(appName, scenarioName, repetition, stepIndex, step.action, 'elapsed_time', elapsedTimeMs);
+          this.reportGenerator.recordStepMetric(appName, scenarioName, repetition, stepIndex, step.action, 'elapsed_time', elapsedTimeMs, scenarioStepIndex);
         }
         // Record any additional metrics returned by the handler
         if (handlerResult && typeof handlerResult === 'object') {
           for (const [metricName, metricValue] of Object.entries(handlerResult)) {
             if (step.metrics.includes(metricName)) {
-              this.reportGenerator.recordStepMetric(appName, scenarioName, repetition, stepIndex, step.action, metricName, metricValue);
+              this.reportGenerator.recordStepMetric(appName, scenarioName, repetition, stepIndex, step.action, metricName, metricValue, scenarioStepIndex);
             }
           }
         }
       }
     } catch (error) {
-      console.error(`Error executing step ${action}:`, error.message);
+      // Only print the first line of error (before diagnostics) to avoid duplication
+      const shortMessage = error.message.split('\n')[0];
+      console.error(`Error executing step ${stepIndex + 1} (${action}): ${shortMessage}`);
       throw error;
     }
   }
@@ -365,21 +582,207 @@ export class VoiceAgentTester {
     await this.page.click(selector);
   }
 
-  async handleWaitForVoice() {
+  async handleClickWithRetry(step) {
+    const selector = step.selector;
+    if (!selector) {
+      throw new Error('No selector specified for click_with_retry action');
+    }
+
+    const maxRetries = step.retries || 2;
+    const retryDelay = step.retryDelay || 3000;
+    const checkDelay = step.checkDelay || 4000;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      let clicked = false;
+      try {
+        await this.page.waitForSelector(selector, { timeout: attempt === 1 ? 30000 : 5000 });
+        await this.page.click(selector);
+        clicked = true;
+      } catch {
+        // Selector not found — will check for widget config errors below
+      }
+
+      if (!clicked) {
+        // Check if the widget is showing a configuration error
+        const widgetState = await this._getWidgetErrorState(selector);
+
+        if (widgetState.isConfigError) {
+          // Widget is showing "unauthenticated web calls" or similar config error.
+          // This means the API config hasn't propagated to the widget yet.
+          if (attempt < maxRetries) {
+            console.log(`\t⚠️ Click attempt ${attempt}/${maxRetries}: widget not ready — "${widgetState.errorText}"`);
+            console.log(`\t⏳ Waiting for configuration to propagate (reloading in ${retryDelay}ms)...`);
+            await this.sleep(retryDelay);
+            await this.page.reload({ waitUntil: 'networkidle0', timeout: 30000 });
+            await this.sleep(2000); // extra time after reload
+            continue;
+          }
+          throw new Error(
+            `Widget configuration not ready after ${maxRetries} attempts: "${widgetState.errorText}"\n` +
+            `The "Supports Unauthenticated Web Calls" setting may not have propagated yet.\n` +
+            `Try running again in a few seconds, or verify the setting in the Telnyx portal.`
+          );
+        }
+
+        // Not a config error — genuinely missing selector
+        if (attempt < maxRetries) {
+          console.log(`\t⚠️ Click attempt ${attempt}/${maxRetries}: selector not found, retrying in ${retryDelay}ms...`);
+          await this.sleep(retryDelay);
+          continue;
+        }
+        throw new Error(`Selector "${selector}" not found after ${maxRetries} attempts`);
+      }
+
+      console.log(`\t🖱️ Click attempt ${attempt}/${maxRetries}`);
+
+      // Wait for connection to establish
+      await this.sleep(checkDelay);
+
+      // Check if audio elements are monitored or WebRTC connections exist
+      const status = await this._checkConnectionStatus();
+
+      if (status.isConnected) {
+        console.log(`\t✅ Connection established (monitored: ${status.monitoredElements}, rtc: ${status.rtcConnections})`);
+        return;
+      }
+
+      if (attempt < maxRetries) {
+        console.log(`\t⚠️ No connection detected (monitored: ${status.monitoredElements}, rtc: ${status.rtcConnections}), retrying in ${retryDelay}ms...`);
+        await this.sleep(retryDelay);
+      } else {
+        console.log(`\t⚠️ No connection detected after ${maxRetries} attempts, proceeding anyway`);
+      }
+    }
+  }
+
+  /**
+   * Check if a widget is showing a configuration error (e.g., "unauthenticated web calls" not enabled).
+   * Inspects the shadow DOM for error indicators.
+   */
+  async _getWidgetErrorState(selector) {
+    const parts = selector.split('>>>').map(s => s.trim());
+    const hostSelector = parts[0];
+
+    return await this.page.evaluate((host) => {
+      const el = document.querySelector(host);
+      if (!el || !el.shadowRoot) return { isConfigError: false };
+
+      const text = el.shadowRoot.textContent || '';
+
+      // Check for known configuration error messages
+      const configErrors = [
+        'unauthenticated web calls',
+        'support unauthenticated',
+        'not configured',
+        'configuration required'
+      ];
+
+      const lowerText = text.toLowerCase();
+      for (const pattern of configErrors) {
+        if (lowerText.includes(pattern)) {
+          // Extract a readable error message
+          const errorText = text.trim().replace(/\s+/g, ' ').substring(0, 200);
+          return { isConfigError: true, errorText };
+        }
+      }
+
+      return { isConfigError: false };
+    }, hostSelector);
+  }
+
+  async _checkConnectionStatus() {
+    const status = await this.page.evaluate(() => {
+      const info = { monitoredElements: 0, hasActiveConnection: false };
+
+      if (window.audioMonitor && window.audioMonitor.monitoredElements) {
+        info.monitoredElements = window.audioMonitor.monitoredElements.size;
+      }
+
+      document.querySelectorAll('audio').forEach(el => {
+        if (el.srcObject) info.hasActiveConnection = true;
+      });
+
+      return info;
+    });
+
+    let rtcConnections = 0;
     try {
-      await this.waitForAudioEvent('audiostart');
-    } catch (error) {
-      console.error('Timeout waiting for voice input:', error.message);
-      throw error;
+      const rtpStats = await this.page.evaluate(async () => {
+        if (typeof window.__getRtpStats === 'function') {
+          return await window.__getRtpStats();
+        }
+        return null;
+      });
+      if (rtpStats) rtcConnections = rtpStats.connectionCount || 0;
+    } catch {
+      // Ignore RTP stats errors
+    }
+
+    return {
+      monitoredElements: status.monitoredElements,
+      rtcConnections,
+      isConnected: status.monitoredElements > 0 || status.hasActiveConnection || rtcConnections > 0
+    };
+  }
+
+  async handleWaitForVoice() {
+    if (this.debug) {
+      console.log('\t⏳ Waiting for audio to start (AI agent response)...');
+    }
+
+    // Check if audio is already playing before waiting for a new event.
+    // This handles the case where audiostart fired before we started listening
+    // (e.g., during click_with_retry or between steps).
+    const alreadyPlaying = await this.page.evaluate(() => {
+      if (window.audioMonitor && window.audioMonitor.monitoredElements) {
+        for (const [, data] of window.audioMonitor.monitoredElements) {
+          if (data.isPlaying) return true;
+        }
+      }
+      return false;
+    });
+
+    if (alreadyPlaying) {
+      if (this.debug) {
+        console.log('\t✅ Audio already playing');
+      }
+      return;
+    }
+
+    await this.waitForAudioEvent('audiostart');
+    if (this.debug) {
+      console.log('\t✅ Audio detected');
     }
   }
 
   async handleWaitForSilence() {
-    try {
-      await this.waitForAudioEvent('audiostop');
-    } catch (error) {
-      console.error('Timeout waiting for silence:', error.message);
-      throw error;
+    if (this.debug) {
+      console.log('\t⏳ Waiting for audio to stop (silence)...');
+    }
+
+    // Check if all monitored elements are already silent.
+    // This handles the case where audiostop fired before we started listening.
+    const allSilent = await this.page.evaluate(() => {
+      if (window.audioMonitor && window.audioMonitor.monitoredElements) {
+        if (window.audioMonitor.monitoredElements.size === 0) return false; // no elements yet
+        for (const [, data] of window.audioMonitor.monitoredElements) {
+          if (data.isPlaying) return false;
+        }
+        return true; // all elements exist and are silent
+      }
+      return false;
+    });
+
+    if (allSilent) {
+      if (this.debug) {
+        console.log('\t✅ Already silent');
+      }
+      return;
+    }
+
+    await this.waitForAudioEvent('audiostop');
+    if (this.debug) {
+      console.log('\t✅ Silence detected');
     }
   }
 
@@ -413,7 +816,10 @@ export class VoiceAgentTester {
         throw new Error(`Audio file not found: ${file}`);
       }
 
-      const fileUrl = `${this.assetsServerUrl}/assets/${file}`;
+      const fileBuffer = fs.readFileSync(filePath);
+      const base64 = fileBuffer.toString('base64');
+      const mimeType = file.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg';
+      const fileUrl = `data:${mimeType};base64,${base64}`;
 
       await this.page.evaluate(async (url) => {
         if (typeof window.__waitForMediaStream === 'function') {
@@ -462,10 +868,40 @@ export class VoiceAgentTester {
 
     // Wait for speech to complete by listening for speechend event
     try {
-      await this.waitForAudioEvent('speechend');
+      // Use a shorter timeout for speechend (15s) since we have safety fallback in browser
+      await this.waitForAudioEvent('speechend', 15000);
     } catch (error) {
-      console.error('Timeout waiting for speech to complete:', error.message);
-      throw error;
+      // speechend timeout is recoverable — the audio likely finished but the event was lost
+      // (e.g., agent started responding and disrupted the audio element)
+      if (this.debug) {
+        // Check the state of the speak audio in the browser
+        const speakState = await this.page.evaluate(() => {
+          const info = {
+            currentSpeakAudio: null,
+            audioContextState: null,
+          };
+          try {
+            if (window.currentSpeakAudio) {
+              info.currentSpeakAudio = {
+                paused: window.currentSpeakAudio.paused,
+                ended: window.currentSpeakAudio.ended,
+                currentTime: window.currentSpeakAudio.currentTime,
+                duration: window.currentSpeakAudio.duration,
+                readyState: window.currentSpeakAudio.readyState,
+              };
+            }
+            if (window.globalAudioContext) {
+              info.audioContextState = window.globalAudioContext.state;
+            }
+          } catch (e) { /* ignore */ }
+          return info;
+        }).catch(() => null);
+
+        console.warn(`\t⚠️ speechend timeout (recovered) — speak audio state:`, JSON.stringify(speakState));
+      } else {
+        console.warn(`\t⚠️ speechend timeout — continuing (audio likely finished)`);
+      }
+      // Don't throw — treat speechend timeout as recoverable
     }
   }
 
@@ -511,16 +947,8 @@ export class VoiceAgentTester {
       const audioFilePath = await this.saveAudioAsWAV(recordingEvent.data.audioData, audioMetadata);
       console.log(`\tAudio saved as: ${audioFilePath}`);
 
-      // Process the audio with OpenAI
-      const transcription = await transcribeAudio(audioFilePath);
-      console.log(`\tTranscription: ${transcription}`);
-
-      // Evaluate the transcription against the evaluation prompt
-      const evaluationResult = await evaluateTranscription(transcription, evaluation);
-      console.log(`\tEvaluation result: ${evaluationResult.score} "${evaluationResult.explanation}"`);
-
       return {
-        score: evaluationResult.score,
+        audioFilePath,
       }
     } catch (error) {
       console.error('Error in listen command:', error.message);
@@ -762,7 +1190,43 @@ export class VoiceAgentTester {
     }
   }
 
-  async runScenario(url, appSteps, scenarioSteps, appName = '', scenarioName = '', repetition = 1, backgroundFile = null) {
+  async startAudioFromUrl(audioUrl, volume = 1.0) {
+    console.log(`🔊 Starting audio from URL: ${audioUrl} (volume: ${volume})`);
+
+    try {
+      await this.page.evaluate(async (url, vol) => {
+        // Wait for media stream to be ready
+        if (typeof window.__waitForMediaStream === 'function') {
+          await window.__waitForMediaStream();
+        }
+
+        if (typeof window.__startAudioFromUrl === 'function') {
+          await window.__startAudioFromUrl(url, vol);
+        } else {
+          throw new Error('__startAudioFromUrl not available in browser context');
+        }
+      }, audioUrl, volume);
+
+      console.log(`🔊 Audio from URL started successfully`);
+    } catch (error) {
+      console.warn(`⚠️ Failed to start audio from URL: ${error.message}`);
+    }
+  }
+
+  async stopAudioFromUrl() {
+    try {
+      await this.page.evaluate(() => {
+        if (typeof window.__stopAudioFromUrl === 'function') {
+          window.__stopAudioFromUrl();
+        }
+      });
+      console.log(`🔊 Audio from URL stopped`);
+    } catch (error) {
+      // Ignore errors when stopping (page might be closed)
+    }
+  }
+
+  async runScenario(url, appSteps, scenarioSteps, appName = '', scenarioName = '', repetition = 1) {
     let success = true;
     try {
       // Start tracking this run with app and scenario names
@@ -775,10 +1239,10 @@ export class VoiceAgentTester {
 
       await this.launch(url);
 
-      await this.page.goto(url, { waitUntil: 'load' });
-
-      // Inject JavaScript files after the page has loaded
+      // Inject JavaScript files before loading the page
       await this.injectJavaScriptFiles();
+
+      await this.page.goto(url, { waitUntil: 'load' });
 
       await this.page.waitForNetworkIdle({ timeout: 5000, concurrency: 2 });
 
@@ -788,11 +1252,20 @@ export class VoiceAgentTester {
       // Start recording if enabled
       await this.startRecording(appName, scenarioName, repetition);
 
+      // Start audio from URL if specified via CLI
+      if (this.audioUrl) {
+        await this.startAudioFromUrl(this.audioUrl, this.audioVolume);
+      }
+
       // Execute all configured steps
+      const appStepCount = appSteps.length;
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
         console.log(`Executing step ${i + 1}: ${JSON.stringify(step)}`);
-        await this.executeStep(step, i, appName, scenarioName, repetition);
+        // For scenario steps (after app steps), pass the 1-based scenario step index
+        // so metrics can be aligned across providers with different app setup steps
+        const scenarioStepIndex = i >= appStepCount ? (i - appStepCount + 1) : null;
+        await this.executeStep(step, i, appName, scenarioName, repetition, scenarioStepIndex);
       }
 
       // Keep the browser open for a bit after all steps
@@ -801,9 +1274,20 @@ export class VoiceAgentTester {
     } catch (error) {
       // Log the error but still finish the run for report generation
       success = false;
-      console.error('Error during scenario execution:', error);
+      // Only print the first line to avoid duplicating diagnostics
+      const shortMessage = error.message.split('\n')[0];
+      console.error(`Error during scenario execution: ${shortMessage}`);
       throw error;
     } finally {
+      // Stop audio from URL if it was started
+      if (this.audioUrl && this.page) {
+        try {
+          await this.stopAudioFromUrl();
+        } catch (e) {
+          // Page might already be closed
+        }
+      }
+
       // Always finish the run for report generation, even if there was an error
       if (this.reportGenerator) {
         this.reportGenerator.endRun(appName, scenarioName, repetition, success);

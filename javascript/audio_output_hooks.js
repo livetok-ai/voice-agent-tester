@@ -7,6 +7,102 @@ const originalCreateElement = document.createElement;
 // Set to track programmatically created Audio instances
 const programmaticAudioInstances = new Set();
 
+// Track RTCPeerConnections for RTP stats
+const rtcPeerConnections = new Set();
+const OriginalRTCPeerConnection = window.RTCPeerConnection;
+
+// Intercept RTCPeerConnection creation
+window.RTCPeerConnection = function(...args) {
+  const pc = new OriginalRTCPeerConnection(...args);
+  rtcPeerConnections.add(pc);
+  console.log(`🔗 RTCPeerConnection created (total: ${rtcPeerConnections.size})`);
+  
+  // Remove from set when connection is closed
+  const originalClose = pc.close.bind(pc);
+  pc.close = function() {
+    rtcPeerConnections.delete(pc);
+    console.log(`🔗 RTCPeerConnection closed (remaining: ${rtcPeerConnections.size})`);
+    return originalClose();
+  };
+  
+  // Also track connection state changes
+  pc.addEventListener('connectionstatechange', () => {
+    if (pc.connectionState === 'closed' || pc.connectionState === 'failed') {
+      rtcPeerConnections.delete(pc);
+    }
+  });
+  
+  return pc;
+};
+
+// Preserve prototype chain
+window.RTCPeerConnection.prototype = OriginalRTCPeerConnection.prototype;
+Object.setPrototypeOf(window.RTCPeerConnection, OriginalRTCPeerConnection);
+
+// Function to get RTP stats from all active peer connections
+window.__getRtpStats = async function() {
+  const allStats = [];
+  
+  for (const pc of rtcPeerConnections) {
+    try {
+      const stats = await pc.getStats();
+      const pcStats = {
+        connectionState: pc.connectionState,
+        iceConnectionState: pc.iceConnectionState,
+        signalingState: pc.signalingState,
+        inboundAudio: [],
+        outboundAudio: [],
+        candidatePairs: []
+      };
+      
+      stats.forEach(report => {
+        if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+          pcStats.inboundAudio.push({
+            packetsReceived: report.packetsReceived,
+            packetsLost: report.packetsLost,
+            bytesReceived: report.bytesReceived,
+            jitter: report.jitter,
+            audioLevel: report.audioLevel,
+            totalAudioEnergy: report.totalAudioEnergy,
+            totalSamplesReceived: report.totalSamplesReceived,
+            concealedSamples: report.concealedSamples,
+            silentConcealedSamples: report.silentConcealedSamples,
+            codecId: report.codecId
+          });
+        } else if (report.type === 'outbound-rtp' && report.kind === 'audio') {
+          pcStats.outboundAudio.push({
+            packetsSent: report.packetsSent,
+            bytesSent: report.bytesSent,
+            targetBitrate: report.targetBitrate,
+            codecId: report.codecId
+          });
+        } else if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+          pcStats.candidatePairs.push({
+            state: report.state,
+            localCandidateId: report.localCandidateId,
+            remoteCandidateId: report.remoteCandidateId,
+            currentRoundTripTime: report.currentRoundTripTime,
+            availableOutgoingBitrate: report.availableOutgoingBitrate
+          });
+        }
+      });
+      
+      allStats.push(pcStats);
+    } catch (error) {
+      allStats.push({
+        error: error.message,
+        connectionState: pc.connectionState
+      });
+    }
+  }
+  
+  return {
+    timestamp: Date.now(),
+    connectionCount: rtcPeerConnections.size,
+    connections: allStats
+  };
+};
+
 class AudioElementMonitor {
   constructor() {
     this.monitoredElements = new Map();
@@ -21,7 +117,21 @@ class AudioElementMonitor {
     this.setupBodyMutationObserver();
     this.scanExistingAudioElements();
     this.setupProgrammaticAudioInterception();
+    this.setupShadowDomInterception();
+    this.startPeriodicScan();
     console.log("AudioElementMonitor initialized");
+  }
+
+  setupShadowDomInterception() {
+    const monitor = this;
+    const originalAttachShadow = Element.prototype.attachShadow;
+    Element.prototype.attachShadow = function(init) {
+      const shadowRoot = originalAttachShadow.call(this, init);
+      monitor.observeNode(shadowRoot);
+      // Also scan for existing elements in the new shadow root
+      monitor.checkForNewAudioElements(shadowRoot);
+      return shadowRoot;
+    };
   }
 
   setupAudioContext() {
@@ -38,6 +148,16 @@ class AudioElementMonitor {
       // Already set up
       return;
     }
+
+    if (!document.body) {
+      console.log("document.body not available yet, waiting for DOMContentLoaded");
+      window.addEventListener('DOMContentLoaded', () => {
+        this.setupBodyMutationObserver();
+        this.scanExistingAudioElements();
+      });
+      return;
+    }
+
     this.bodyMutationObserver = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         if (mutation.type === 'childList') {
@@ -50,12 +170,27 @@ class AudioElementMonitor {
       });
     });
 
-    this.bodyMutationObserver.observe(document.body, {
+    this.observeNode(document.body);
+    console.log("Body MutationObserver setup complete");
+  }
+
+  observeNode(node) {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.type === 'childList') {
+          mutation.addedNodes.forEach((addedNode) => {
+            if (addedNode.nodeType === Node.ELEMENT_NODE) {
+              this.checkForNewAudioElements(addedNode);
+            }
+          });
+        }
+      });
+    });
+
+    observer.observe(node, {
       childList: true,
       subtree: true
     });
-
-    console.log("Body MutationObserver setup complete");
   }
 
   setupProgrammaticAudioInterception() {
@@ -188,6 +323,42 @@ class AudioElementMonitor {
         this.handleAudioElement(audioEl);
       }
     });
+  }
+
+  /**
+   * Periodic scan for unmonitored audio elements.
+   * Catches elements that bypass interceptors (e.g., created in bundled code
+   * that captured native constructors, or appended to shadow DOMs not observed).
+   */
+  startPeriodicScan() {
+    setInterval(() => {
+      // Scan all audio elements in the main document
+      const allAudio = document.querySelectorAll('audio');
+      allAudio.forEach(audioEl => {
+        const elementId = this.getElementId(audioEl);
+        if (!this.monitoredElements.has(elementId) && (audioEl.srcObject || audioEl.src)) {
+          console.log(`Periodic scan found unmonitored audio element: ${elementId}`);
+          if (audioEl.srcObject && audioEl.srcObject instanceof MediaStream) {
+            this.monitorAudioElement(audioEl, elementId);
+          } else if (audioEl.src) {
+            this.monitorProgrammaticAudioElement(audioEl, elementId);
+          }
+        }
+      });
+
+      // Also scan programmatic Audio instances that were intercepted but never monitored
+      programmaticAudioInstances.forEach(audioEl => {
+        const elementId = this.getElementId(audioEl);
+        if (!this.monitoredElements.has(elementId) && (audioEl.srcObject || audioEl.src)) {
+          console.log(`Periodic scan found unmonitored programmatic audio: ${elementId}`);
+          if (audioEl.srcObject && audioEl.srcObject instanceof MediaStream) {
+            this.monitorAudioElement(audioEl, elementId);
+          } else if (audioEl.src) {
+            this.monitorProgrammaticAudioElement(audioEl, elementId);
+          }
+        }
+      });
+    }, 2000);
   }
 
   handleAudioElement(audioElement) {
@@ -392,8 +563,96 @@ class AudioElementMonitor {
 
       console.log(`Started monitoring programmatic audio element: ${elementId}`);
     } catch (error) {
-      console.error(`Failed to monitor programmatic audio element ${elementId}:`, error);
+      console.error(`Failed to monitor programmatic audio element ${elementId} via analyser:`, error.message);
+      console.log(`Falling back to event-based monitoring for ${elementId}`);
+      this.monitorViaEvents(audioElement, elementId);
     }
+  }
+
+  /**
+   * Fallback monitoring using audio element events (timeupdate/playing/pause).
+   * Used when AudioContext-based monitoring fails (e.g., when the audio element
+   * is already connected to another AudioContext via MediaStreamDestination).
+   */
+  monitorViaEvents(audioElement, elementId) {
+    const monitorData = {
+      element: audioElement,
+      source: null,
+      analyser: null,
+      dataArray: null,
+      isPlaying: false,
+      lastAudioTime: 0,
+      silenceThreshold: 10,
+      checkInterval: null,
+      isProgrammatic: true,
+      eventBased: true
+    };
+
+    this.monitoredElements.set(elementId, monitorData);
+
+    // Use timeupdate to detect audio activity — fires ~4x/sec during playback
+    let lastTimeUpdate = 0;
+    let silenceTimeoutId = null;
+    const SILENCE_DELAY = 1500; // ms of no timeupdate before declaring silence
+
+    const resetSilenceTimer = () => {
+      if (silenceTimeoutId) clearTimeout(silenceTimeoutId);
+      silenceTimeoutId = setTimeout(() => {
+        if (monitorData.isPlaying) {
+          monitorData.isPlaying = false;
+          this.dispatchAudioEvent('audiostop', elementId, audioElement);
+          if (typeof window.__publishEvent === 'function') {
+            window.__publishEvent('audiostop', { elementId, timestamp: Date.now() });
+          }
+          console.log(`Audio stopped (event-based): ${elementId}`);
+        }
+      }, SILENCE_DELAY);
+    };
+
+    audioElement.addEventListener('timeupdate', () => {
+      const now = Date.now();
+      // timeupdate fires even when seeking; only count if currentTime advances
+      if (audioElement.currentTime > 0 && now - lastTimeUpdate > 50) {
+        lastTimeUpdate = now;
+        monitorData.lastAudioTime = now;
+
+        if (!monitorData.isPlaying) {
+          monitorData.isPlaying = true;
+          this.dispatchAudioEvent('audiostart', elementId, audioElement);
+          if (typeof window.__publishEvent === 'function') {
+            window.__publishEvent('audiostart', { elementId, timestamp: Date.now() });
+          }
+          console.log(`Audio started (event-based): ${elementId}`);
+        }
+        resetSilenceTimer();
+      }
+    });
+
+    audioElement.addEventListener('pause', () => {
+      if (monitorData.isPlaying) {
+        monitorData.isPlaying = false;
+        if (silenceTimeoutId) clearTimeout(silenceTimeoutId);
+        this.dispatchAudioEvent('audiostop', elementId, audioElement);
+        if (typeof window.__publishEvent === 'function') {
+          window.__publishEvent('audiostop', { elementId, timestamp: Date.now() });
+        }
+        console.log(`Audio stopped (event-based, pause): ${elementId}`);
+      }
+    });
+
+    audioElement.addEventListener('ended', () => {
+      if (monitorData.isPlaying) {
+        monitorData.isPlaying = false;
+        if (silenceTimeoutId) clearTimeout(silenceTimeoutId);
+        this.dispatchAudioEvent('audiostop', elementId, audioElement);
+        if (typeof window.__publishEvent === 'function') {
+          window.__publishEvent('audiostop', { elementId, timestamp: Date.now() });
+        }
+        console.log(`Audio stopped (event-based, ended): ${elementId}`);
+      }
+    });
+
+    console.log(`Started event-based monitoring for programmatic audio element: ${elementId}`);
   }
 
   monitorAudioElement(audioElement, elementId) {
@@ -430,7 +689,9 @@ class AudioElementMonitor {
 
       console.log(`Started monitoring audio element: ${elementId}`);
     } catch (error) {
-      console.error(`Failed to monitor audio element ${elementId}:`, error);
+      console.error(`Failed to monitor audio element ${elementId} via analyser:`, error.message);
+      console.log(`Falling back to event-based monitoring for ${elementId}`);
+      this.monitorViaEvents(audioElement, elementId);
     }
   }
 
@@ -438,10 +699,18 @@ class AudioElementMonitor {
     const { analyser, dataArray, silenceThreshold } = monitorData;
 
     monitorData.checkInterval = setInterval(() => {
-      analyser.getByteFrequencyData(dataArray);
+      // Use time-domain data for silence detection — more robust than frequency data.
+      // Time-domain bytes center at 128 for silence; we measure RMS deviation.
+      // This avoids false positives from FFT noise floor / RTP comfort noise.
+      analyser.getByteTimeDomainData(dataArray);
 
-      const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
-      const hasAudio = average > silenceThreshold;
+      let sumSquares = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const deviation = dataArray[i] - 128;
+        sumSquares += deviation * deviation;
+      }
+      const rms = Math.sqrt(sumSquares / dataArray.length);
+      const hasAudio = rms > silenceThreshold;
 
       // if (i++ % 10 == 0) {
       //   console.log(`Average: ${average} hasAudio: ${hasAudio} elementId: ${elementId}`);
@@ -563,6 +832,45 @@ document.addEventListener('audio-monitor-audiostop', (event) => {
 });
 
 window.audioMonitor = audioMonitor;
+
+// Expose a diagnostic function to get detailed audio monitoring state
+window.__getAudioDiagnostics = function() {
+  const diagnostics = {
+    timestamp: Date.now(),
+    audioContextState: audioMonitor.audioContext ? audioMonitor.audioContext.state : 'not-created',
+    monitoredElementsCount: audioMonitor.monitoredElements.size,
+    elements: []
+  };
+
+  audioMonitor.monitoredElements.forEach((monitorData, elementId) => {
+    const { analyser, dataArray, silenceThreshold, isPlaying, lastAudioTime, isProgrammatic } = monitorData;
+    
+    // Get current audio level if analyser is available (RMS of time-domain deviation)
+    let currentRms = null;
+    if (analyser && dataArray) {
+      analyser.getByteTimeDomainData(dataArray);
+      let sumSquares = 0;
+      for (let j = 0; j < dataArray.length; j++) {
+        const deviation = dataArray[j] - 128;
+        sumSquares += deviation * deviation;
+      }
+      currentRms = Math.sqrt(sumSquares / dataArray.length);
+    }
+
+    diagnostics.elements.push({
+      elementId,
+      isPlaying,
+      isProgrammatic: !!isProgrammatic,
+      silenceThreshold,
+      currentAudioLevel: currentRms !== null ? currentRms.toFixed(2) : 'unavailable',
+      wouldTriggerAudioStart: currentRms !== null ? currentRms > silenceThreshold : 'unknown',
+      lastAudioTime,
+      timeSinceLastAudio: lastAudioTime ? Date.now() - lastAudioTime : null
+    });
+  });
+
+  return diagnostics;
+};
 
 // Recording functionality
 let isRecording = false;

@@ -1,0 +1,11 @@
+url: "https://portal.telnyx.com/#/ai-widget-demo?assistantId={{assistantId}}"
+steps:
+  - action: wait_for_element
+    selector: "telnyx-ai-agent"
+  - action: sleep
+    time: 3000
+  - action: click_with_retry
+    selector: "telnyx-ai-agent >>> button"
+    retries: 5
+    checkDelay: 4000
+    retryDelay: 5000
